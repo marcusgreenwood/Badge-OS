@@ -7,6 +7,12 @@ build_bins/
 *.map
 *.hex
 
+# Screenshots / captures / design previews
+screenshots/
+**/screenshots/
+*_preview.png
+esp32-conference-badge-screens/
+
 # Python
 **/__pycache__/
 *.py[cod]
@@ -27,12 +33,17 @@ tools/.venv/
 *.pem
 credentials.json
 
+# Root helpers / local flash config
+partitions_unified.csv
+promo_codes.js
+promo_codes.py
+
 # Large / generated caches
 DoomPod/managed_components/
 **/compile_commands.json
+hotel-tower-web/.wrangler/
 
 # Vendor datasheets / demos (not needed to build)
 libraries/SensorLib/datasheet/
 libraries/SensorLib/examples/
 libraries/GFX_Library_for_Arduino/examples/
-screenshots/a3-loading/
