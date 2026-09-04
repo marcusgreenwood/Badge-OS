@@ -1,0 +1,13 @@
+# Unified partition table for the hu-pod multi-app launcher (16MB flash)
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  1M,
+ota_0,    app,  ota_0,   0x110000, 1M,
+ota_1,    app,  ota_1,   0x210000, 1536K,
+ota_2,    app,  ota_2,   0x390000, 1M,
+ota_3,    app,  ota_3,   0x490000, 1M,
+ota_4,    app,  ota_4,   0x590000, 1536K,
+wad,      66,   6,       0x710000, 8M,
+ota_5,    app,  ota_5,   0xF10000, 960K,

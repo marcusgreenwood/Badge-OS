@@ -1,0 +1,11 @@
+{
+  // Hotel Tower promo game - static assets served by a Cloudflare Worker
+  // Deployed to the Automation Cloud account
+  "name": "hotel-tower",
+  "compatibility_date": "2025-01-01",
+  "account_id": "1576143bcc75cad7e6ba1288bcf5ada7",
+  "assets": {
+    "directory": "./",
+    "not_found_handling": "single-page-application"
+  }
+}

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>A3 Loading capture</title>
+  <style>
+    html, body {
+      margin: 0;
+      background: #ffffff;
+      width: 320px;
+      height: 320px;
+      overflow: hidden;
+    }
+    .stage {
+      width: 320px;
+      height: 320px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #ffffff;
+    }
+    /* Exact copy of a3-platform Loading.vue */
+    .Loading {
+      --Loading-color: #4f46e5;
+      --Loading-stroke-width: 7.2;
+      width: 280px;
+      height: 280px;
+    }
+    .Loading-mark {
+      fill: none;
+      stroke: var(--Loading-color);
+      stroke-width: var(--Loading-stroke-width);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      animation: Loading-dash 40s linear infinite;
+    }
+    @keyframes Loading-dash {
+      0% { stroke-dasharray: 70, 30; stroke-dashoffset: 0; }
+      50% { stroke-dasharray: 5, 50; stroke-dashoffset: 500; }
+      100% { stroke-dasharray: 70, 30; stroke-dashoffset: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <svg class="Loading" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+      <path
+        class="Loading-mark"
+        id="mark"
+        pathLength="100"
+        d="M 63.999985,63.999996 14.844273,35.653537 63.999989,7.3070782 113.15569,35.653537 V 92.346454 L 63.999989,120.69292 14.844273,92.346454 V 54.551177 l 49.155716,28.346457 16.38522,-9.448819 V 54.551177 L 47.61475,35.653537 63.999989,26.204718 96.770448,45.102357 V 82.897634 L 63.999989,101.79528 31.229511,82.897634" />
+    </svg>
+  </div>
+  <script>
+    // Drive the exact Loading.vue keyframe lerp ourselves — CSS animation-delay
+    // seeking is unreliable when paused, which produced wrong baked frames.
+    window.seekLoading = function (tSeconds) {
+      const mark = document.getElementById('mark');
+      mark.style.animation = 'none';
+      const period = 40;
+      const half = period / 2;
+      const t = ((tSeconds % period) + period) % period;
+      // 0% → 50% → 100% linear over slowed cycle
+      const p = t <= half ? t / half : (period - t) / half;
+      const dashOn = 70 + (5 - 70) * p;
+      const dashOff = 30 + (50 - 30) * p;
+      const offset = 500 * p;
+      mark.style.strokeDasharray = dashOn + ' ' + dashOff;
+      mark.style.strokeDashoffset = String(offset);
+    };
+    window.seekLoading(0);
+  </script>
+</body>
+</html>

@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Archivo:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&family=Chivo:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin:0; padding:0; background:#0B0B0B; }
+  a { color:#4C7DFF; text-decoration:none; }
+  a:hover { color:#8AA9FF; }
+  :root {
+    --page:#0B0B0B; --bg:#000000; --fg:#EDEAE4; --dim:#8C8880; --faint:#5E5B55;
+    --line:#2A2825; --line2:#1C1B19; --line3:#131211;
+    --bez1:#26241F; --bez2:#0C0B0A; --bezEdge:#34322C; --hover:#171614;
+    --accent:#4C7DFF; --ink:#000000; --disc:#FFFFFF;
+    --font:'Helvetica Neue',Helvetica,Arial,sans-serif;
+  }
+  @keyframes sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes blip { 0%,100% { opacity:.45; } 50% { opacity:1; } }
+</style>
+</helmet>
+
+<div style="{{ theme }}">
+<div style="min-height:100vh; background:var(--page); color:var(--fg); font-family:var(--font); display:grid; grid-template-columns:minmax(0,1fr) 250px; align-items:start; column-gap:32px; padding:32px 32px 56px;">
+
+  <div style="display:flex; flex-direction:column; align-items:center; gap:26px;">
+    <div style="width:560px; max-width:100%; height:560px; display:flex; align-items:center; justify-content:center;">
+      <div style="width:520px; height:520px; flex:none; border-radius:50%; background:linear-gradient(160deg,var(--bez1),var(--bez2) 64%); padding:27px; box-sizing:border-box; box-shadow:0 0 0 1px var(--bezEdge), 0 30px 70px rgba(0,0,0,.55);">
+
+        <div onPointerDown="{{ down }}" onPointerUp="{{ up }}" onPointerLeave="{{ cancel }}" style="position:relative; width:466px; height:466px; border-radius:50%; background:var(--bg); overflow:hidden; touch-action:none; user-select:none; cursor:pointer;">
+
+          <sc-if value="{{ ticks }}" hint-placeholder-val="{{ true }}">
+            <div style="position:absolute; inset:0; z-index:3; pointer-events:none;">
+              <div style="position:absolute; inset:0; border-radius:50%; background:repeating-conic-gradient(from 0deg, var(--line) 0 .32deg, transparent .32deg 6deg); -webkit-mask:radial-gradient(circle at 50% 50%, transparent 0 203px, #000 203px 210px, transparent 210px); mask:radial-gradient(circle at 50% 50%, transparent 0 203px, #000 203px 210px, transparent 210px);"></div>
+              <div style="position:absolute; inset:0; border-radius:50%; background:repeating-conic-gradient(from 0deg, var(--faint) 0 .5deg, transparent .5deg 30deg); -webkit-mask:radial-gradient(circle at 50% 50%, transparent 0 198px, #000 198px 210px, transparent 210px); mask:radial-gradient(circle at 50% 50%, transparent 0 198px, #000 198px 210px, transparent 210px);"></div>
+            </div>
+          </sc-if>
+
+          <svg viewBox="0 0 466 466" style="position:absolute; inset:0; width:466px; height:466px; z-index:4; pointer-events:none; overflow:visible;">
+            <defs>
+              <path id="arcTop" d="M 51 233 A 182 182 0 0 1 415 233" fill="none"></path>
+              <path id="arcBot" d="M 55 233 A 178 178 0 0 0 411 233" fill="none"></path>
+            </defs>
+            <circle cx="233" cy="233" r="224" fill="none" stroke="var(--line2)" stroke-width="3"></circle>
+            <circle cx="233" cy="233" r="224" fill="none" stroke="var(--accent)" stroke-width="3" stroke-dasharray="{{ arcDash }}" stroke-dashoffset="{{ arcOff }}" transform="rotate(-90 233 233)"></circle>
+            {{ arcLabels }}
+          </svg>
+
+          <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:84px 58px; box-sizing:border-box; z-index:2;">
+
+            <sc-if value="{{ s0 }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex; flex-direction:column; align-items:center;">
+                <div style="font-size:56px; font-weight:700; letter-spacing:-.02em; line-height:1.04;">MARCUS</div>
+                <div style="font-size:56px; font-weight:700; letter-spacing:-.02em; line-height:1.08;">GREENWOOD</div>
+                <div style="width:96px; height:2px; background:var(--accent); margin:22px 0 18px;"></div>
+                <div style="display:flex; align-items:center; gap:14px;">
+                  <div style="font-size:30px; font-weight:500; letter-spacing:.02em;">CEO</div>
+                  <div style="width:1px; height:26px; background:var(--line);"></div>
+                  <sc-if value="{{ darkSurface }}" hint-placeholder-val="{{ true }}">
+                    <img src="ubio-mark-light.svg" alt="UBIO" style="height:38px; display:block;" />
+                  </sc-if>
+                  <sc-if value="{{ lightSurface }}">
+                    <img src="ubio-mark-sand.svg" alt="UBIO" style="height:38px; display:block;" />
+                  </sc-if>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ s1 }}">
+              <div style="position:relative; width:264px; height:264px; display:flex; align-items:center; justify-content:center;">
+                <div style="position:absolute; inset:-13px; border-radius:50%; border:1px solid var(--line);"></div>
+                <div style="position:absolute; inset:0; border-radius:50%; background:var(--disc); overflow:hidden; display:flex; align-items:center; justify-content:center;">{{ qr }}</div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ s3 }}">
+              <div style="position:relative; width:300px; height:300px; display:flex; align-items:center; justify-content:center;">
+                <svg viewBox="0 0 300 300" style="position:absolute; inset:0; width:300px; height:300px;">
+                  <circle cx="150" cy="150" r="146" fill="none" stroke="var(--line2)" stroke-width="6"></circle>
+                  <circle cx="150" cy="150" r="146" fill="none" stroke="var(--accent)" stroke-width="6" stroke-dasharray="184 733" transform="rotate(-90 150 150)"></circle>
+                </svg>
+                <div style="display:flex; flex-direction:column; align-items:center;">
+                  <div style="font-size:70px; font-weight:700; letter-spacing:-.03em; line-height:1;">14:30</div>
+                  <div style="font-family:'IBM Plex Mono',monospace; font-size:16px; letter-spacing:.14em; color:var(--accent); margin-top:8px;">IN 12 MIN</div>
+                  <div style="width:120px; height:1px; background:var(--line); margin:16px 0 14px;"></div>
+                  <div style="font-size:26px; font-weight:700; line-height:1.15; text-align:center; text-wrap:balance; max-width:210px;">AGENTIC BROWSING AT SCALE</div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ s4 }}">
+              <div style="display:flex; flex-direction:column; align-items:center; gap:28px; width:100%;">
+                <div style="{{ statusDot }}"></div>
+                <div style="font-size:50px; font-weight:700; line-height:1.02; text-align:center; letter-spacing:-.015em; text-wrap:balance;">{{ statusLabel }}</div>
+                <div style="display:flex; gap:14px;">
+                  <div onClick="{{ statusPrev }}" onPointerDown="{{ stop }}" onPointerUp="{{ stop }}" style="width:92px; height:56px; border:1px solid var(--line); border-radius:28px; display:flex; align-items:center; justify-content:center; font-size:22px; color:var(--dim);" style-active="background:var(--hover);">&#8592;</div>
+                  <div onClick="{{ statusNext }}" onPointerDown="{{ stop }}" onPointerUp="{{ stop }}" style="width:92px; height:56px; border:1px solid var(--line); border-radius:28px; display:flex; align-items:center; justify-content:center; font-size:22px; color:var(--dim);" style-active="background:var(--hover);">&#8594;</div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ s5 }}">
+              <div style="display:flex; flex-direction:column; align-items:center; gap:14px; width:100%;">
+                <sc-if value="{{ hasNotif }}">
+                  <div style="display:flex; flex-direction:column; align-items:center; gap:8px;">
+                    <div style="font-size:40px; font-weight:700; letter-spacing:-.015em; text-align:center;">{{ notifName }}</div>
+                    <div style="font-size:24px; color:var(--dim); text-align:center; text-wrap:balance; max-width:290px;">{{ notifBody }}</div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ noNotif }}">
+                  <div style="font-size:36px; font-weight:700; color:var(--faint);">ALL CLEAR</div>
+                </sc-if>
+                <div style="display:flex; gap:14px; margin-top:10px;">
+                  <div onClick="{{ dismiss }}" onPointerDown="{{ stop }}" onPointerUp="{{ stop }}" style="width:118px; height:64px; border-radius:32px; border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-family:'IBM Plex Mono',monospace; font-size:15px; letter-spacing:.12em; color:var(--dim);" style-active="background:var(--hover);">LATER</div>
+                  <div onClick="{{ accept }}" onPointerDown="{{ stop }}" onPointerUp="{{ stop }}" style="width:118px; height:64px; border-radius:32px; background:var(--accent); display:flex; align-items:center; justify-content:center; font-family:'IBM Plex Mono',monospace; font-size:15px; letter-spacing:.12em; font-weight:600; color:var(--ink);">ACCEPT</div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ s6 }}">
+              <div style="position:relative; width:300px; height:300px; display:flex; align-items:center; justify-content:center;">
+                <svg viewBox="0 0 300 300" style="position:absolute; inset:0; width:300px; height:300px;">
+                  <circle cx="150" cy="150" r="143" fill="none" stroke="var(--line2)" stroke-width="10" stroke-dasharray="674 225" transform="rotate(115 150 150)"></circle>
+                  <circle cx="150" cy="150" r="143" fill="none" stroke="var(--accent)" stroke-width="10" stroke-dasharray="526 373" transform="rotate(115 150 150)"></circle>
+                </svg>
+                <div style="display:flex; flex-direction:column; align-items:center; width:166px;">
+                  <div style="font-size:76px; font-weight:700; letter-spacing:-.04em; line-height:1;">78%</div>
+                  <div style="width:100%; height:1px; background:var(--line); margin:16px 0 13px;"></div>
+                  <div style="display:grid; grid-template-columns:auto 1fr; gap:10px 16px; width:100%; font-family:'IBM Plex Mono',monospace; font-size:15px; letter-spacing:.04em;">
+                    <div style="color:var(--faint);">BLE</div><div style="text-align:right; color:var(--accent);">4 PAIRED</div>
+                    <div style="color:var(--faint);">WIFI</div><div style="text-align:right;">CONF-5G</div>
+                    <div style="color:var(--faint);">SYNC</div><div style="text-align:right;">2 MIN</div>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ s7 }}">
+              <div onClick="{{ shuffle }}" onPointerDown="{{ stop }}" onPointerUp="{{ stop }}" style="display:flex; flex-direction:column; align-items:center; gap:24px; width:100%;">
+                <div style="font-size:44px; font-weight:700; line-height:1.08; text-align:center; letter-spacing:-.02em; text-wrap:balance;">{{ icebreaker }}</div>
+                <div style="display:flex; gap:7px;">
+                  <sc-for list="{{ iceDots }}" as="d" hint-placeholder-count="4">
+                    <div style="{{ d.style }}"></div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ s8 }}">
+              <div style="position:relative; width:290px; height:290px; display:flex; align-items:center; justify-content:center;">
+
+                <sc-if value="{{ arcadeClosed }}" hint-placeholder-val="{{ true }}">
+                  <div onClick="{{ openGame }}" style="display:flex; flex-direction:column; align-items:center; gap:22px; cursor:pointer;">
+                    <div style="font-size:46px; font-weight:700; line-height:1.04; text-align:center; letter-spacing:-.02em;">HOTEL<br />TOWER</div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:15px; letter-spacing:.12em; color:var(--faint);">BEST FLOOR {{ best }}</div>
+                    <div style="width:172px; height:60px; border-radius:30px; background:var(--accent); color:var(--ink); display:flex; align-items:center; justify-content:center; font-family:'IBM Plex Mono',monospace; font-size:15px; font-weight:600; letter-spacing:.14em;">TAP TO PLAY</div>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ arcadeOpen }}">
+                  <div onClick="{{ drop }}" style="position:relative; width:242px; height:280px; cursor:pointer;">
+                    <div style="position:absolute; top:0; left:0; right:0; display:flex; justify-content:space-between; font-family:'IBM Plex Mono',monospace; font-size:14px; letter-spacing:.12em; color:var(--faint);">
+                      <span>FLOOR <span style="color:var(--fg); font-size:20px; font-weight:600;">{{ floors }}</span></span>
+                      <span>BEST <span style="color:var(--fg); font-size:20px; font-weight:600;">{{ best }}</span></span>
+                    </div>
+                    <div style="position:absolute; left:0; bottom:0; width:242px; height:236px; overflow:hidden;">
+                      <sc-for list="{{ tower }}" as="b" hint-placeholder-count="4">
+                        <div style="{{ b.style }}"></div>
+                      </sc-for>
+                      <div style="{{ curStyle }}"></div>
+                      <div style="position:absolute; left:0; right:0; bottom:0; height:1px; background:var(--line);"></div>
+                    </div>
+                    <sc-if value="{{ gameOver }}">
+                      <div style="position:absolute; left:0; right:0; top:112px; text-align:center; font-family:'IBM Plex Mono',monospace; font-size:15px; letter-spacing:.14em; color:var(--fg); background:var(--bg); padding:10px 0;">MISSED &#183; TAP TO RESTART</div>
+                    </sc-if>
+                  </div>
+                </sc-if>
+
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ s9 }}">
+              <div style="position:relative; width:300px; height:300px; display:flex; align-items:center; justify-content:center;">
+                <div style="position:absolute; inset:0; border-radius:50%; border:1px solid var(--line2);"></div>
+                <div style="position:absolute; inset:52px; border-radius:50%; border:1px solid var(--line3);"></div>
+                <div style="position:absolute; inset:104px; border-radius:50%; border:1px solid var(--line3);"></div>
+                <div style="{{ sweepStyle }}"></div>
+                <sc-for list="{{ radar }}" as="p" hint-placeholder-count="4">
+                  <div style="{{ p.style }}">
+                    <div style="width:12px; height:12px; border-radius:50%; background:var(--accent); animation:blip 2s ease-in-out infinite;"></div>
+                    <div style="font-family:'IBM Plex Mono',monospace; font-size:15px; letter-spacing:.04em; white-space:nowrap;">{{ p.name }}</div>
+                  </div>
+                </sc-for>
+                <div style="display:flex; flex-direction:column; align-items:center;">
+                  <div style="font-size:58px; font-weight:700; letter-spacing:-.03em; line-height:1;">4</div>
+                  <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; letter-spacing:.16em; color:var(--dim); margin-top:4px;">NEARBY</div>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ s10 }}">
+              <div style="display:flex; flex-direction:column; width:284px;">
+                <sc-for list="{{ settings }}" as="r" hint-placeholder-count="4">
+                  <div onClick="{{ r.go }}" onPointerDown="{{ stop }}" onPointerUp="{{ stop }}" style="{{ r.style }}">
+                    <span style="font-family:'IBM Plex Mono',monospace; font-size:15px; letter-spacing:.12em; color:var(--faint);">{{ r.label }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace; font-size:20px; letter-spacing:.02em; color:var(--fg);">{{ r.value }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+          </div>
+
+          <sc-if value="{{ menuOpen }}">
+            <div onClick="{{ closeMenu }}" onPointerDown="{{ stop }}" onPointerUp="{{ stop }}" style="{{ scrimStyle }}">
+              <div style="position:absolute; left:50%; top:50%; width:332px; height:332px; margin:-166px 0 0 -166px; border-radius:50%; border:1px solid var(--line2);"></div>
+              <sc-for list="{{ menu }}" as="m" hint-placeholder-count="10">
+                <div onClick="{{ m.go }}" style="{{ m.style }}">
+                  <div style="font-family:'IBM Plex Mono',monospace; font-size:15px; font-weight:600; letter-spacing:.04em; color:{{ m.fg }}; text-align:center;">{{ m.short }}</div>
+                </div>
+              </sc-for>
+              <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:112px; height:112px; border-radius:50%; border:1px solid var(--line); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;">
+                <div style="font-size:26px; color:var(--dim); line-height:1;">&#215;</div>
+                <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.14em; color:var(--faint);">CLOSE</div>
+              </div>
+            </div>
+          </sc-if>
+
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center; font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.14em; color:var(--dim);">
+      <span style="border:1px solid var(--line); padding:7px 12px;">TAP CENTRE &#8594; NEXT SCREEN</span>
+      <span style="border:1px solid var(--line); padding:7px 12px;">PRESS &amp; HOLD &#8594; MENU RING</span>
+    </div>
+
+    <div style="display:flex; flex-wrap:wrap; justify-content:center; gap:8px; max-width:560px;">
+      <sc-for list="{{ screens }}" as="s" hint-placeholder-count="10">
+        <div onClick="{{ s.go }}" style="{{ s.style }}" style-hover="background:var(--hover);">
+          <span style="font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--faint);">{{ s.num }}</span>
+          <span style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.12em; color:{{ s.fg }};">{{ s.code }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex; flex-direction:column; gap:20px;">
+    <div>
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.18em; color:var(--dim); margin-bottom:8px;">BADGE OS / ESP32-S3</div>
+      <div style="font-size:14px; line-height:1.5; color:var(--dim);">1.75&#8243; round AMOLED, 466&#215;466, capacitive touch. Shown 1:1.</div>
+    </div>
+    <div style="height:1px; background:var(--line);"></div>
+    <div>
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.18em; color:var(--faint); margin-bottom:10px;">{{ num }} / {{ total }}</div>
+      <div style="font-size:23px; font-weight:700; letter-spacing:-.015em; line-height:1.15;">{{ title }}</div>
+    </div>
+    <div style="font-size:15px; line-height:1.55; color:var(--dim);">{{ desc }}</div>
+    <div style="height:1px; background:var(--line);"></div>
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.18em; color:var(--faint);">GESTURES</div>
+      <sc-for list="{{ gestures }}" as="g" hint-placeholder-count="2">
+        <div style="display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:start;">
+          <span style="width:5px; height:5px; border-radius:50%; background:var(--accent); margin-top:7px;"></span>
+          <span style="font-size:14px; line-height:1.5; color:var(--fg);">{{ g }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1000,&quot;height&quot;:820},&quot;palette&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Signal Orange&quot;,&quot;Cobalt&quot;,&quot;Signal Yellow&quot;,&quot;Deep Green&quot;,&quot;Achromatic&quot;],&quot;default&quot;:&quot;Cobalt&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Palette&quot;},&quot;surface&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Black&quot;,&quot;Sand&quot;],&quot;default&quot;:&quot;Black&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Palette&quot;},&quot;font&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Helvetica&quot;,&quot;Archivo&quot;,&quot;Space Grotesk&quot;,&quot;Chivo&quot;,&quot;Plex Mono&quot;],&quot;default&quot;:&quot;Helvetica&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Type&quot;},&quot;ticks&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Chrome&quot;}}">
+const SCREENS = [
+  { code: 'IDENTITY', top: 'BADGE OS', bot: 'SPEAKER \u00B7 STAGE 2', title: 'Identity (idle)', desc: 'The default face. Name at 56px puts cap height near 4.5mm on the 44.5mm panel, which holds up at 2m. The rim arc marks position in the screen loop.', gestures: ['Tap centre to advance', 'Press and hold for the menu ring'] },
+  { code: 'CONNECT', top: 'SCAN TO CONNECT', bot: 'MARCUS GREENWOOD \u00B7 UBIO', title: 'QR contact exchange', desc: 'The module field fills the disc edge to edge so the code is as large as the panel allows. A production build would inset it to leave the quiet zone a scanner needs.', gestures: ['Tap centre to advance', 'Auto-returns to Identity after 30s'] },
+  { code: 'SCHEDULE', top: 'NEXT SESSION', bot: 'STAGE 2 \u00B7 YOU SPEAK', title: 'Next session', desc: 'One item, never a list. The ring drains as the countdown runs, so the time left is legible before the numbers are.', gestures: ['Tap centre to advance', 'Hold to snooze the reminder'] },
+  { code: 'STATUS', top: 'AVAILABILITY', bot: 'SET BY MARCUS \u00B7 09:12', title: 'Availability', desc: 'One disc of colour and one line of text. Colour carries at distance; the words settle it up close.', gestures: ['Tap \u2190 / \u2192 to change status', 'Tap centre to advance'] },
+  { code: 'INBOX', top: 'INBOX', bot: 'BLE \u00B7 DELIVERED 09:41', title: 'Live notifications', desc: 'One at a time. Accept writes the contact to your list; Later hands it to the phone app. Both targets are 118\u00D764.', gestures: ['Tap ACCEPT or LATER', 'Tap centre to advance'] },
+  { code: 'SYSTEM', top: 'SYSTEM', bot: '14H REMAINING', title: 'Battery and radios', desc: 'Battery drawn as a gauge arc with a gap at the bottom, so charge is read as an angle before it is read as a number.', gestures: ['Tap centre to advance'] },
+  { code: 'ICEBREAKER', top: 'ASK ME ABOUT', bot: 'TAP TO SHUFFLE', title: 'Ask me about', desc: 'A rotating opener. Tapping the text anywhere cycles it, and the dots show where you are in the set.', gestures: ['Tap the text to shuffle', 'Tap centre to advance'] },
+  { code: 'ARCADE', top: 'HOTEL TOWER', bot: 'CONFERENCE LEADERBOARD', title: 'Easter egg: Hotel Tower', desc: 'A block slides across the floor; tap to drop it. Overhang is trimmed, so the tower narrows until you miss. Tap the play card to open it \u2014 while it is running, centre-tap drops instead of advancing, and press-and-hold gets you out.', gestures: ['Tap TAP TO PLAY to open', 'Tap anywhere to drop a floor', 'Press and hold to leave'] },
+  { code: 'RADAR', top: 'NEARBY', bot: 'BLE PROXIMITY \u00B7 LIVE', title: 'Who is nearby', desc: 'Distance from centre is signal strength, so the display is the sensor. Names appear only for people who also opted in.', gestures: ['Tap a name to request a connect', 'Tap centre to advance'] },
+  { code: 'SETTINGS', top: 'SETTINGS', bot: 'STORED ON DEVICE', title: 'Settings', desc: 'No sub-menus. Each row is a single control: tap it to step to the next option and the whole badge repaints. Rows are 60px tall, well clear of the 44px minimum.', gestures: ['Tap a row to cycle its value', 'Tap centre to advance'] }
+];
+
+const SURFACES = {
+  'Black': { page: '#0B0B0B', bg: '#000000', fg: '#EDEAE4', dim: '#8C8880', faint: '#5E5B55', line: '#2A2825', line2: '#1C1B19', line3: '#131211', bez1: '#26241F', bez2: '#0C0B0A', bezEdge: '#34322C', hover: '#171614', scrim: 'rgba(0,0,0,.88)', mark: 'ubio-mark-light.svg' },
+  'Sand': { page: '#C9C5BB', bg: '#E4E1D9', fg: '#1A1917', dim: '#6B6862', faint: '#918D85', line: '#B7B2A7', line2: '#CFCAC0', line3: '#DAD6CC', bez1: '#F2EFE8', bez2: '#C2BEB4', bezEdge: '#B0ABA0', hover: '#D8D4CA', scrim: 'rgba(228,225,217,.9)', mark: 'uploads/brand-1788524603347-flwk.svg' }
+};
+
+const PALETTES = {
+  'Signal Orange': { accent: '#E8541F', ink: '#FFFFFF' },
+  'Cobalt': { accent: '#4C7DFF', ink: '#000000' },
+  'Signal Yellow': { accent: '#E5A700', ink: '#000000' },
+  'Deep Green': { accent: '#0E8A55', ink: '#FFFFFF' },
+  'Achromatic': { accent: null, ink: null }
+};
+
+const FONTS = {
+  'Helvetica': "'Helvetica Neue',Helvetica,Arial,sans-serif",
+  'Archivo': "'Archivo','Helvetica Neue',Arial,sans-serif",
+  'Space Grotesk': "'Space Grotesk','Helvetica Neue',Arial,sans-serif",
+  'Chivo': "'Chivo','Helvetica Neue',Arial,sans-serif",
+  'Plex Mono': "'IBM Plex Mono',monospace"
+};
+
+const STATUSES = [
+  { label: 'OPEN TO CHAT', tone: 'accent' },
+  { label: 'IN A MEETING', tone: '#C2341A' },
+  { label: 'HEADS DOWN', tone: 'dim' },
+  { label: 'COFFEE RUN', tone: '#C98A00' }
+];
+
+const ICEBREAKERS = ['WHY WE KILLED OUR ROADMAP', 'BROWSER AGENTS THAT DO NOT BREAK', 'HIRING ENGINEER No. 1', 'THE WORST DEMO I EVER GAVE'];
+
+const NOTIFS = [
+  { name: 'PRIYA RAO', body: 'wants to swap contacts' },
+  { name: 'LUCAS BERG', body: 'invites you to lunch, 12:45' },
+  { name: 'STAGE 2', body: 'your mic check is in 20 min' }
+];
+
+const RADAR = [
+  { name: 'PRIYA R.', a: -62, r: 112 },
+  { name: 'TOM K.', a: 34, r: 84 },
+  { name: 'AYA N.', a: 134, r: 130 },
+  { name: 'LUCAS B.', a: -146, r: 98 }
+];
+
+const SHORT = ['ID', 'QR', 'NEXT', 'STAT', 'INBOX', 'SYS', 'ASK', 'PLAY', 'NEAR', 'SET'];
+const CIRC = 2 * Math.PI * 224;
+
+class Component extends DCLogic {
+  state = { i: 0, menu: false, status: 0, ice: 0, notif: 0, best: 9, playing: false, over: false, blocks: [], cur: null, oSurface: null, oPalette: null, oFont: null, oTicks: null };
+
+  openGame = (e) => {
+    if (e) e.stopPropagation();
+    cancelAnimationFrame(this._raf);
+    this.setState({ playing: true, over: false, blocks: [{ x: 61, w: 120 }], cur: { x: 0, w: 120, dir: 1 } }, () => {
+      this._raf = requestAnimationFrame(this.tick);
+    });
+  };
+
+  tick = () => {
+    const c = this.state.cur;
+    if (!this.state.playing || this.state.over || !c) return;
+    let x = c.x + c.dir * 2.6, dir = c.dir;
+    if (x <= 0) { x = 0; dir = 1; }
+    if (x + c.w >= 242) { x = 242 - c.w; dir = -1; }
+    this.setState({ cur: { x: x, w: c.w, dir: dir } });
+    this._raf = requestAnimationFrame(this.tick);
+  };
+
+  drop = (e) => {
+    if (e) e.stopPropagation();
+    if (this.state.over) { this.openGame(); return; }
+    const c = this.state.cur, blocks = this.state.blocks;
+    const top = blocks[blocks.length - 1];
+    const l = Math.max(c.x, top.x), r = Math.min(c.x + c.w, top.x + top.w);
+    const ov = r - l;
+    if (ov <= 4) {
+      cancelAnimationFrame(this._raf);
+      this.setState({ over: true, best: Math.max(this.state.best, blocks.length) });
+      return;
+    }
+    const next = blocks.concat([{ x: l, w: ov }]);
+    this.setState({ blocks: next, best: Math.max(this.state.best, next.length), cur: { x: c.dir > 0 ? 0 : 242 - ov, w: ov, dir: -c.dir } });
+  };
+
+  componentWillUnmount() { cancelAnimationFrame(this._raf); clearTimeout(this._t); }
+
+  cycle(key, list, current) {
+    const n = list[(list.indexOf(current) + 1) % list.length];
+    this.setState({ [key]: n });
+  }
+
+  go(i) { cancelAnimationFrame(this._raf); this.setState({ i: i, menu: false, playing: false, over: false }); }
+
+  down = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    this._x = (e.clientX - r.left) / r.width * 466;
+    this._y = (e.clientY - r.top) / r.height * 466;
+    this._held = false;
+    clearTimeout(this._t);
+    this._t = setTimeout(() => { this._held = true; this.setState({ menu: true }); }, 400);
+  };
+
+  up = () => {
+    clearTimeout(this._t);
+    if (this._held) { this._held = false; return; }
+    if (this.state.menu || this.state.playing) return;
+    const dx = this._x - 233, dy = this._y - 233;
+    if (Math.sqrt(dx * dx + dy * dy) < 112) this.go((this.state.i + 1) % SCREENS.length);
+  };
+
+  cancel = () => { clearTimeout(this._t); };
+  stop = (e) => { e.stopPropagation(); };
+
+  renderVals() {
+    const R = React.createElement;
+    const i = this.state.i, s = SCREENS[i];
+    const surfName = this.state.oSurface || (SURFACES[this.props.surface] ? this.props.surface : 'Black');
+    const palName = this.state.oPalette || (PALETTES[this.props.palette] ? this.props.palette : 'Cobalt');
+    const fontName = this.state.oFont || (FONTS[this.props.font] ? this.props.font : 'Helvetica');
+    const ticksOn = this.state.oTicks === null ? (this.props.ticks !== false) : this.state.oTicks;
+    const sf = SURFACES[surfName];
+    const pl = PALETTES[palName];
+    const accent = pl.accent || sf.fg;
+    const ink = pl.ink || sf.bg;
+
+    const theme = {
+      '--page': sf.page, '--bg': sf.bg, '--fg': sf.fg, '--dim': sf.dim, '--faint': sf.faint,
+      '--line': sf.line, '--line2': sf.line2, '--line3': sf.line3,
+      '--bez1': sf.bez1, '--bez2': sf.bez2, '--bezEdge': sf.bezEdge, '--hover': sf.hover,
+      '--accent': accent, '--ink': ink, '--disc': '#FFFFFF',
+      '--font': FONTS[fontName]
+    };
+
+    const rowStyle = 'display:flex; align-items:center; justify-content:space-between; gap:16px; height:60px; border-bottom:1px solid ' + sf.line2 + '; cursor:pointer;';
+    const settings = [
+      { key: 'oSurface', label: 'SURFACE', value: surfName, style: rowStyle, go: (e) => { e.stopPropagation(); this.cycle('oSurface', Object.keys(SURFACES), surfName); } },
+      { key: 'oPalette', label: 'ACCENT', value: palName, style: rowStyle, go: (e) => { e.stopPropagation(); this.cycle('oPalette', Object.keys(PALETTES), palName); } },
+      { key: 'oFont', label: 'TYPE', value: fontName, style: rowStyle, go: (e) => { e.stopPropagation(); this.cycle('oFont', Object.keys(FONTS), fontName); } },
+      { key: 'oTicks', label: 'DIAL', value: ticksOn ? 'ON' : 'OFF', style: rowStyle + ' border-bottom:none;', go: (e) => { e.stopPropagation(); this.setState({ oTicks: !ticksOn }); } }
+    ];
+
+    const st = STATUSES[this.state.status];
+    const stColor = st.tone === 'accent' ? accent : (st.tone === 'dim' ? sf.dim : st.tone);
+    const queue = NOTIFS.slice(this.state.notif);
+    const seg = CIRC / SCREENS.length;
+
+    const menu = SCREENS.map((sc, n) => {
+      const a = (n / SCREENS.length) * 2 * Math.PI - Math.PI / 2;
+      const x = 233 + Math.cos(a) * 166, y = 233 + Math.sin(a) * 166;
+      return {
+        short: SHORT[n],
+        fg: n === i ? accent : sf.fg,
+        go: (e) => { e.stopPropagation(); this.go(n); },
+        style: 'position:absolute; left:' + x.toFixed(1) + 'px; top:' + y.toFixed(1) + 'px; width:84px; height:84px; margin:-42px 0 0 -42px; border-radius:50%; border:1px solid ' + (n === i ? accent : sf.line) + '; display:flex; align-items:center; justify-content:center; cursor:pointer;'
+      };
+    });
+
+    const radar = RADAR.map((p) => {
+      const a = p.a * Math.PI / 180;
+      const x = 150 + Math.cos(a) * p.r, y = 150 + Math.sin(a) * p.r;
+      return { name: p.name, style: 'position:absolute; left:' + x.toFixed(1) + 'px; top:' + y.toFixed(1) + 'px; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; gap:5px;' };
+    });
+
+    const N = 33, FIND = [[5, 5], [5, 21], [21, 5]];
+    const mods = [];
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      let on = null;
+      for (const f of FIND) {
+        const rr = f[0], cc = f[1];
+        if (r >= rr - 1 && r <= rr + 7 && c >= cc - 1 && c <= cc + 7) {
+          const inBox = r >= rr && r < rr + 7 && c >= cc && c < cc + 7;
+          const ring = inBox && !(r > rr && r < rr + 6 && c > cc && c < cc + 6);
+          const core = r > rr + 1 && r < rr + 5 && c > cc + 1 && c < cc + 5;
+          on = ring || core;
+          break;
+        }
+      }
+      if (on === null) on = ((r * 73 + c * 151 + ((r * c) % 17) * 29) % 100) < 47;
+      if (on) mods.push(R('rect', { key: r + '-' + c, x: c, y: r, width: 1, height: 1, fill: '#000' }));
+    }
+
+    const FH = 22, VIS = 10;
+    const nb = this.state.blocks.length;
+    const cam = Math.max(0, nb - (VIS - 1));
+    const tower = this.state.blocks.slice(cam).map((b, n) => ({
+      style: 'position:absolute; left:' + b.x.toFixed(1) + 'px; width:' + b.w.toFixed(1) + 'px; bottom:' + ((n) * FH) + 'px; height:' + (FH - 3) + 'px; background:' + ((cam + n) % 4 === 3 ? sf.fg : accent) + ';'
+    }));
+    const cb = this.state.cur;
+    const curStyle = (cb && this.state.playing && !this.state.over)
+      ? 'position:absolute; left:' + cb.x.toFixed(1) + 'px; width:' + cb.w.toFixed(1) + 'px; bottom:' + ((nb - cam) * FH) + 'px; height:' + (FH - 3) + 'px; background:' + accent + '; opacity:.5;'
+      : 'display:none;';
+
+    const hex = accent.replace('#', '');
+    const rgb = [0, 2, 4].map((k) => parseInt(hex.substr(k, 2), 16)).join(',');
+
+    return {
+      theme: theme,
+      ticks: ticksOn,
+      settings: settings,
+      s10: s.code === 'SETTINGS',
+      darkSurface: this.props.surface !== 'Sand',
+      lightSurface: this.props.surface === 'Sand',
+      screens: SCREENS.map((sc, n) => ({
+        num: String(n + 1).padStart(2, '0'), code: sc.code,
+        fg: n === i ? sf.fg : sf.dim,
+        style: 'display:flex; align-items:baseline; gap:8px; cursor:pointer; padding:7px 11px; border:1px solid ' + (n === i ? sf.dim : sf.line) + '; background:' + (n === i ? sf.hover : 'transparent') + ';',
+        go: () => this.go(n)
+      })),
+      s0: s.code === 'IDENTITY', s1: s.code === 'CONNECT', s3: s.code === 'SCHEDULE',
+      s4: s.code === 'STATUS', s5: s.code === 'INBOX', s6: s.code === 'SYSTEM',
+      s7: s.code === 'ICEBREAKER', s8: s.code === 'ARCADE', s9: s.code === 'RADAR',
+      arcLabels: R(React.Fragment, null,
+        R('text', { fill: sf.dim, fontFamily: 'IBM Plex Mono, monospace', fontSize: 14, letterSpacing: 4.2 },
+          R('textPath', { href: '#arcTop', startOffset: '50%', textAnchor: 'middle' }, s.top)),
+        R('text', { fill: accent, fontFamily: 'IBM Plex Mono, monospace', fontSize: 13, letterSpacing: 3.4 },
+          R('textPath', { href: '#arcBot', startOffset: '50%', textAnchor: 'middle' }, s.bot))
+      ),
+      num: String(i + 1).padStart(2, '0'), total: SCREENS.length, title: s.title, desc: s.desc, gestures: s.gestures,
+      arcDash: (seg - 8).toFixed(1) + ' ' + (CIRC - seg + 8).toFixed(1),
+      arcOff: (-i * seg).toFixed(1),
+      menu: menu, radar: radar,
+      qr: R('svg', { viewBox: '0 0 ' + N + ' ' + N, width: 264, height: 264, shapeRendering: 'crispEdges', style: { display: 'block' } }, mods),
+      sweepStyle: 'position:absolute; inset:0; border-radius:50%; background:conic-gradient(from 0deg, rgba(' + rgb + ',.28), rgba(' + rgb + ',0) 66deg); animation:sweep 3.6s linear infinite;',
+      scrimStyle: 'position:absolute; inset:0; z-index:9; background:' + sf.scrim + '; border-radius:50%;',
+      menuOpen: this.state.menu,
+      down: this.down, up: this.up, cancel: this.cancel, stop: this.stop,
+      closeMenu: () => this.setState({ menu: false }),
+      statusLabel: st.label,
+      statusDot: 'width:76px; height:76px; border-radius:50%; background:' + stColor + ';',
+      statusNext: (e) => { e.stopPropagation(); this.setState({ status: (this.state.status + 1) % STATUSES.length }); },
+      statusPrev: (e) => { e.stopPropagation(); this.setState({ status: (this.state.status + STATUSES.length - 1) % STATUSES.length }); },
+      icebreaker: ICEBREAKERS[this.state.ice],
+      iceDots: ICEBREAKERS.map((_, n) => ({ style: 'width:7px; height:7px; border-radius:50%; background:' + (n === this.state.ice ? accent : sf.line) + ';' })),
+      shuffle: (e) => { e.stopPropagation(); this.setState({ ice: (this.state.ice + 1) % ICEBREAKERS.length }); },
+      hasNotif: queue.length > 0, noNotif: queue.length === 0,
+      notifName: queue.length ? queue[0].name : '', notifBody: queue.length ? queue[0].body : '',
+      accept: (e) => { e.stopPropagation(); this.setState({ notif: Math.min(this.state.notif + 1, NOTIFS.length) }); },
+      dismiss: (e) => { e.stopPropagation(); this.setState({ notif: Math.min(this.state.notif + 1, NOTIFS.length) }); },
+      best: this.state.best,
+      floors: this.state.blocks.length,
+      arcadeClosed: !this.state.playing,
+      arcadeOpen: this.state.playing,
+      gameOver: this.state.over,
+      openGame: this.openGame, drop: this.drop,
+      tower: tower, curStyle: curStyle
+    };
+  }
+}
+</script>
+</body>
+</html>

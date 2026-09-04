@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>A3 Loading mark</title>
+  <style>
+    :root {
+      --bg: #0b0f1a;
+      --ink: #4f46e5;
+      --mist: #c7d2fe;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 40%, #1a1f3a 0%, var(--bg) 70%);
+      color: var(--mist);
+      font-family: "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2rem;
+      padding: 2rem;
+    }
+
+    .disc {
+      width: min(72vw, 420px);
+      height: min(72vw, 420px);
+      border-radius: 50%;
+      background: #ffffff;
+      display: grid;
+      place-items: center;
+      box-shadow:
+        0 0 0 1px rgba(199, 210, 254, 0.15),
+        0 24px 80px rgba(0, 0, 0, 0.45);
+    }
+
+    /* Exact copy of a3-platform Loading.vue */
+    .Loading {
+      --Loading-color: #4f46e5;
+      --Loading-stroke-width: 7.2;
+      width: 68%;
+      height: 68%;
+    }
+
+    .Loading-mark {
+      fill: none;
+      stroke: var(--Loading-color);
+      stroke-width: var(--Loading-stroke-width);
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      animation: Loading-dash 40s linear infinite;
+    }
+
+    @keyframes Loading-dash {
+      0% {
+        stroke-dasharray: 70, 30;
+        stroke-dashoffset: 0;
+      }
+      50% {
+        stroke-dasharray: 5, 50;
+        stroke-dashoffset: 500;
+      }
+      100% {
+        stroke-dasharray: 70, 30;
+        stroke-dashoffset: 0;
+      }
+    }
+
+    .meta {
+      text-align: center;
+      max-width: 28rem;
+    }
+
+    .meta h1 {
+      margin: 0 0 0.4rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #fff;
+    }
+
+    .meta p {
+      margin: 0;
+      font-size: 0.95rem;
+      line-height: 1.45;
+      opacity: 0.75;
+    }
+
+    .meta code {
+      font-size: 0.85em;
+      color: var(--mist);
+    }
+  </style>
+</head>
+<body>
+  <div class="disc" aria-hidden="true">
+    <svg
+      class="Loading"
+      viewBox="0 0 128 128"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="A3 loading mark">
+      <path
+        class="Loading-mark"
+        pathLength="100"
+        d="M 63.999985,63.999996 14.844273,35.653537 63.999989,7.3070782 113.15569,35.653537 V 92.346454 L 63.999989,120.69292 14.844273,92.346454 V 54.551177 l 49.155716,28.346457 16.38522,-9.448819 V 54.551177 L 47.61475,35.653537 63.999989,26.204718 96.770448,45.102357 V 82.897634 L 63.999989,101.79528 31.229511,82.897634" />
+    </svg>
+  </div>
+
+  <div class="meta">
+    <h1>A3 Loading</h1>
+    <p>
+      Same SVG path and <code>Loading-dash</code> keyframes as
+      <code>a3-platform</code> <code>Loading.vue</code>, slowed to a 40s linear loop.
+    </p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,38 @@
+# Build outputs
+**/build/
+build_bins/
+*.bin
+!partitions_unified.bin
+*.elf
+*.map
+*.hex
+
+# Python
+**/__pycache__/
+*.py[cod]
+.venv/
+tools/.venv/
+*.egg-info/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+.claude/
+
+# Secrets / local env
+.env
+.env.*
+*.pem
+credentials.json
+
+# Large / generated caches
+DoomPod/managed_components/
+**/compile_commands.json
+
+# Vendor datasheets / demos (not needed to build)
+libraries/SensorLib/datasheet/
+libraries/SensorLib/examples/
+libraries/GFX_Library_for_Arduino/examples/
+screenshots/a3-loading/
