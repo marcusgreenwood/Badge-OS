@@ -1,20 +1,31 @@
 # Badge OS
 
-A generic operating system for conference and event badges built on a circular-screen ESP32.
+A generic operating system for conference and event badges built on a circular-screen ESP32. It targets the Waveshare round AMOLED board below, and can be adapted to other similar ESP32 hardware with a circular touch display.
+
+Built by **Marcus Greenwood**, Chief Vibe Code Officer at [UBIO](https://ubio.ai).
 
 Attendees get a wearable identity surface—name, photo, QR, schedule, icebreakers—plus room to launch event-specific apps and games from the same device.
 
+There are also two easter eggs:
+
+1. **Hotel Tower** — UBIO’s stack-the-floors game. Climb high enough and you can unlock promo codes for free credits on [Hotel-Universe.travel](https://hotel-universe.travel).
+2. **DOOM** — because DOOM should run on every device.
+
 ## Hardware
 
-[Waveshare ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.75) — 466×466 round AMOLED, capacitive touch, IMU, 16MB flash.
+Reference board: [Waveshare ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.75) — 466×466 round AMOLED, capacitive touch, IMU, 16MB flash.
+
+The same Badge OS idea works on other similar ESP32 setups (round or circular-safe UI, touch, enough flash for the OS + app slots). Pin maps, panel drivers, and the partition table may need adjusting per board.
 
 ## Apps
 
-| Folder | Role | Slot |
-|--------|------|------|
+
+| Folder              | Role                                                | Slot      |
+| ------------------- | --------------------------------------------------- | --------- |
 | **ConferenceBadge** | Badge OS (default boot) — faces, menu, app launcher | `factory` |
-| **HotelTower** | Stack-the-floors promo game | `ota_1` |
-| **DoomPod** | Doom on the round display (ESP-IDF) | `ota_4` |
+| **HotelTower**      | Stack-the-floors promo game                         | `ota_1`   |
+| **DoomPod**         | Doom on the round display (ESP-IDF)                 | `ota_4`   |
+
 
 ConferenceBadge boots by default and can hand off to apps in the OTA partitions, then return.
 
@@ -33,12 +44,14 @@ Local helpers such as `promo_codes.*` and capture screenshots are gitignored.
 
 ## Flash map (16MB)
 
-| Offset | Size | Contents |
-|--------|------|----------|
-| `0x10000` | 2MB | ConferenceBadge |
-| `0x210000` | 1536K | HotelTower |
-| `0x590000` | 1536K | DoomPod |
-| `0x710000` | 8MB | Doom WAD partition |
+
+| Offset     | Size  | Contents           |
+| ---------- | ----- | ------------------ |
+| `0x10000`  | 2MB   | ConferenceBadge    |
+| `0x210000` | 1536K | HotelTower         |
+| `0x590000` | 1536K | DoomPod            |
+| `0x710000` | 8MB   | Doom WAD partition |
+
 
 See `partitions_unified.csv` for the full table.
 
@@ -83,14 +96,16 @@ Badge OS is designed so you can change event branding, faces, and apps by prompt
 
 Point the agent at the right surface, then describe the outcome:
 
-| Goal | Start here |
-|------|------------|
-| Name, company, Wi‑Fi, schedule, icebreakers, theme | `ConferenceBadge/badge_settings.h`, `profile.h` |
-| Photo / QR / logo assets | `ConferenceBadge/photo.h`, `qr_halftone.h`, `company_mark*.h` (or regenerate via `tools/`) |
-| New or changed badge faces / menu | `ConferenceBadge/ConferenceBadge.ino` (`BadgeFace`, `drawFace*`, gestures) |
-| Arcade / promo game behavior | `HotelTower/HotelTower.ino` |
-| Doom or other ESP-IDF apps | `DoomPod/` |
-| Flash layout / new app slots | `partitions_unified.csv` + launcher handoff in ConferenceBadge |
+
+| Goal                                               | Start here                                                                                 |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Name, company, Wi‑Fi, schedule, icebreakers, theme | `ConferenceBadge/badge_settings.h`, `profile.h`                                            |
+| Photo / QR / logo assets                           | `ConferenceBadge/photo.h`, `qr_halftone.h`, `company_mark*.h` (or regenerate via `tools/`) |
+| New or changed badge faces / menu                  | `ConferenceBadge/ConferenceBadge.ino` (`BadgeFace`, `drawFace*`, gestures)                 |
+| Arcade / promo game behavior                       | `HotelTower/HotelTower.ino`                                                                |
+| Doom or other ESP-IDF apps                         | `DoomPod/`                                                                                 |
+| Flash layout / new app slots                       | `partitions_unified.csv` + launcher handoff in ConferenceBadge                             |
+
 
 Example prompts:
 
@@ -115,3 +130,4 @@ When prompting, remind the agent of the platform limits so changes stay flashabl
 2. Ask it to read `README.md`, `badge_settings.h`, and the relevant `.ino` before editing.
 3. Have it make a small, reviewable change (config first, then UI/logic).
 4. Build/flash, then iterate with screenshot or serial feedback (`tools/snap_badge_os.py` if available).
+
