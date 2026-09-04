@@ -10,6 +10,9 @@ build_bins/
 # Screenshots / captures / design previews
 screenshots/
 **/screenshots/
+!screenshots/badge-os/
+screenshots/badge-os/*
+!screenshots/badge-os/badge-os-faces.gif
 *_preview.png
 esp32-conference-badge-screens/
 

@@ -11,6 +11,8 @@ There are also two easter eggs:
 1. **Hotel Tower** — UBIO’s stack-the-floors game. Climb high enough and you can unlock promo codes for free credits on [Hotel-Universe.travel](https://hotel-universe.travel).
 2. **DOOM** — because DOOM should run on every device.
 
+![Badge OS faces](screenshots/badge-os/badge-os-faces.gif)
+
 ## Hardware
 
 Reference board: [Waveshare ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.75) — 466×466 round AMOLED, capacitive touch, IMU, 16MB flash.
