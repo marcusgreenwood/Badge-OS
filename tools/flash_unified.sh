@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Flash all hu-pod apps using partitions_unified.csv (16MB Waveshare board).
+# Flash all Badge OS apps using partitions_unified.csv (16MB Waveshare board).
 # Requires arduino-cli builds in each sketch folder and esptool on PATH.
 set -euo pipefail
 

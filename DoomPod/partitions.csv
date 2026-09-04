@@ -1,4 +1,4 @@
-# Unified partition table for the hu-pod multi-app launcher (16MB flash)
+# Unified partition table for the Badge OS multi-app launcher (16MB flash)
 # Name,   Type, SubType, Offset,   Size
 nvs,      data, nvs,     0x9000,   0x4000,
 otadata,  data, ota,     0xd000,   0x2000,

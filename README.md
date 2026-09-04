@@ -1,4 +1,4 @@
-# hu-pod
+# Badge OS
 
 A generic operating system for conference and event badges built on a circular-screen ESP32.
 
@@ -74,3 +74,44 @@ Useful debug commands over USB serial:
 ## Extending
 
 Add a new event app as an Arduino sketch (or ESP-IDF project), place its binary in a free OTA slot from the unified partition table, and register a launcher entry in ConferenceBadge. Keep the round 466×466 canvas and shared touch / power-button helpers so apps feel like part of the same OS.
+
+## Using a coding agent
+
+Badge OS is designed so you can change event branding, faces, and apps by prompting a coding agent (Cursor, Claude Code, etc.) in this repo.
+
+### What to ask for
+
+Point the agent at the right surface, then describe the outcome:
+
+| Goal | Start here |
+|------|------------|
+| Name, company, Wi‑Fi, schedule, icebreakers, theme | `ConferenceBadge/badge_settings.h`, `profile.h` |
+| Photo / QR / logo assets | `ConferenceBadge/photo.h`, `qr_halftone.h`, `company_mark*.h` (or regenerate via `tools/`) |
+| New or changed badge faces / menu | `ConferenceBadge/ConferenceBadge.ino` (`BadgeFace`, `drawFace*`, gestures) |
+| Arcade / promo game behavior | `HotelTower/HotelTower.ino` |
+| Doom or other ESP-IDF apps | `DoomPod/` |
+| Flash layout / new app slots | `partitions_unified.csv` + launcher handoff in ConferenceBadge |
+
+Example prompts:
+
+- “Update the identity face for DevConf 2026: name Jane Doe, company Acme, sand theme, cobalt accent.”
+- “Replace the schedule and icebreaker copy with this agenda list.”
+- “Add a new face that shows our sponsor QR and put it in the rim menu.”
+- “Add a new Arduino sketch app in `ota_2` and wire a launcher tile from Arcade.”
+
+### Constraints to mention
+
+When prompting, remind the agent of the platform limits so changes stay flashable:
+
+- Display is **466×466 circular** — UI must stay inside the round safe area (rim + center action disc).
+- **ConferenceBadge** and **HotelTower** are Arduino sketches; **DoomPod** is ESP-IDF.
+- Multi-app boots use the unified partition table; apps return via the shared launcher/power helpers (`launcher_exit.h`, `power_button.h`).
+- Prefer editing config headers over hard-coding one-off strings in draw code when possible.
+- After firmware changes, flash with `./tools/flash_badge_os.sh` (OS only) or `./tools/flash_unified.sh` (all slots). Use `SNAP` / `FACE` / `MENU` over serial to verify.
+
+### Suggested agent workflow
+
+1. Open this repo in the agent and state the event goal in one sentence.
+2. Ask it to read `README.md`, `badge_settings.h`, and the relevant `.ino` before editing.
+3. Have it make a small, reviewable change (config first, then UI/logic).
+4. Build/flash, then iterate with screenshot or serial feedback (`tools/snap_badge_os.py` if available).
