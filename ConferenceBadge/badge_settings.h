@@ -9,7 +9,7 @@
 #ifndef BADGE_SURFACE
 #define BADGE_SURFACE 0
 #endif
-// Palette: index into kAccents[] (Orange, Cobalt, Yellow, … Achromatic)
+// Palette: index into kAccents[] (Orange, Cobalt, … Rainbow, Achromatic)
 #ifndef BADGE_PALETTE
 #define BADGE_PALETTE 1
 #endif
@@ -65,9 +65,13 @@ static const char *const kStatusLabels[] = {
     "COFFEE RUN",
 };
 static const int kStatusN = sizeof(kStatusLabels) / sizeof(kStatusLabels[0]);
-// Tone: 0=accent, 1=dim, else packed RGB as 0xRRGGBB in kStatusToneRgb
-static const uint8_t kStatusTone[] = {0, 2, 1, 3};
-static const uint32_t kStatusToneRgb[] = {0, 0, 0xC2341A, 0xC98A00};
+// Fixed semantic colours — never follow theme accent (green = available, etc.)
+static const uint32_t kStatusColorRgb[] = {
+    0x0E8A55,  // OPEN TO CHAT — green
+    0xD4202A,  // IN A MEETING — red
+    0x6B7280,  // HEADS DOWN — slate
+    0xE5A700,  // COFFEE RUN — yellow
+};
 
 // ---- Icebreakers ----
 static const char *const kIcebreakers[] = {

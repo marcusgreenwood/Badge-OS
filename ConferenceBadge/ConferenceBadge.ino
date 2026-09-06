@@ -257,10 +257,50 @@ static const AccentSwatch kAccents[] = {
     {"Mint", 0x2B, 0xBF, 0x8A, 0},
     {"Ember", 0xFF, 0x57, 0x22, 1},
     {"Rose", 0xE0, 0x4F, 0x6E, 1},
+    {"Rainbow", 0, 0, 0, 0},      // per-face accents
     {"Achromatic", 0, 0, 0, 0},  // uses surface fg/bg
 };
 static constexpr int kAccentN =
     (int)(sizeof(kAccents) / sizeof(kAccents[0]));
+static constexpr int kPaletteRainbow = kAccentN - 2;
+static constexpr int kPaletteAchromatic = kAccentN - 1;
+
+// Hue walk around the dial — one accent per face (Rainbow palette)
+static const uint8_t kFaceAccentRgb[FACE_COUNT][3] = {
+    {0xE8, 0x54, 0x1F},  // IDENTITY — orange
+    {0xE5, 0xA7, 0x00},  // CONNECT — yellow
+    {0x8B, 0xC3, 0x4A},  // SCHEDULE — lime
+    {0x0E, 0x8A, 0x55},  // STATUS — green
+    {0x0D, 0x9B, 0x8A},  // INBOX — teal
+    {0x00, 0xB8, 0xD4},  // SYSTEM — cyan
+    {0x4C, 0x7D, 0xFF},  // ICEBREAKER — cobalt
+    {0x7C, 0x5C, 0xFF},  // ARCADE — violet
+    {0xD1, 0x2B, 0x8A},  // RADAR — magenta
+    {0xE0, 0x4F, 0x6E},  // RECORDER — rose
+    {0xF5, 0x9E, 0x0B},  // SETTINGS — amber
+};
+
+static bool isRainbowPalette() { return cfgPalette == kPaletteRainbow; }
+
+static void setAccentRgb(uint8_t r, uint8_t g, uint8_t b) {
+  theme.accent = rgb(r, g, b);
+  const int lum = (r * 299 + g * 587 + b * 114) / 1000;
+  theme.ink = lum > 160 ? rgb(0x00, 0x00, 0x00) : rgb(0xFF, 0xFF, 0xFF);
+}
+
+static uint16_t faceAccentColor(int face, uint8_t bri = 255) {
+  if (face < 0) face = 0;
+  face %= FACE_COUNT;
+  const uint8_t *c = kFaceAccentRgb[face];
+  return rgb((uint8_t)((c[0] * bri) / 255), (uint8_t)((c[1] * bri) / 255),
+             (uint8_t)((c[2] * bri) / 255));
+}
+
+static void applyFaceAccent(int face) {
+  if (face < 0 || face >= FACE_COUNT) face = 0;
+  const uint8_t *c = kFaceAccentRgb[face];
+  setAccentRgb(c[0], c[1], c[2]);
+}
 
 void applyTheme() {
   if (cfgSurface == 1) {
@@ -292,12 +332,13 @@ void applyTheme() {
   }
 
   if (cfgPalette >= kAccentN) cfgPalette = 0;
-  const AccentSwatch &sw = kAccents[cfgPalette];
-  if (cfgPalette == kAccentN - 1) {
-    // Achromatic — last swatch
+  if (cfgPalette == kPaletteAchromatic) {
     theme.accent = theme.fg;
     theme.ink = theme.bg;
+  } else if (cfgPalette == kPaletteRainbow) {
+    applyFaceAccent((int)badgeFace);
   } else {
+    const AccentSwatch &sw = kAccents[cfgPalette];
     theme.accent = rgb(sw.r, sw.g, sw.b);
     theme.ink = sw.inkW ? rgb(0xFF, 0xFF, 0xFF) : rgb(0x00, 0x00, 0x00);
   }
@@ -949,6 +990,19 @@ void drawDialTicks() {
 }
 
 void drawRimTrack() {
+  if (isRainbowPalette()) {
+    // Quiet rainbow segments around the dial — one hue per face
+    const float gap = 2.0f;
+    const float span = (360.0f / (float)FACE_COUNT) - gap;
+    const uint8_t bri = (cfgSurface == 1) ? 110 : 90;
+    for (int i = 0; i < FACE_COUNT; i++) {
+      const float startDeg =
+          -90.0f + (float)i * (360.0f / (float)FACE_COUNT) + gap * 0.5f;
+      gfx->fillArc(kCx, kCy, (int)kOuterR + 1, (int)kOuterR - 2, startDeg,
+                   startDeg + span, faceAccentColor(i, bri));
+    }
+    return;
+  }
   gfx->drawCircle(kCx, kCy, (int)kOuterR, theme.line2);
   gfx->drawCircle(kCx, kCy, (int)kOuterR - 1, theme.line2);
 }
@@ -959,8 +1013,15 @@ void drawFaceIndicator(float pos) {
   // 12 o'clock, then clockwise as the face index increases
   const float startDeg = -90.0f + pos * (360.0f / FACE_COUNT);
   const float spanDeg = (dash / kCirc) * 360.0f;
+  uint16_t col = theme.accent;
+  if (isRainbowPalette()) {
+    int fi = (int)floorf(pos + 0.5f);
+    while (fi < 0) fi += FACE_COUNT;
+    fi %= FACE_COUNT;
+    col = faceAccentColor(fi);
+  }
   gfx->fillArc(kCx, kCy, (int)kOuterR + 1, (int)kOuterR - 2, startDeg,
-               startDeg + spanDeg, theme.accent);
+               startDeg + spanDeg, col);
 }
 
 // Axis-aligned bounds of the sliding rim dash (padded for fillArc coverage)
@@ -1087,13 +1148,14 @@ void drawMenuRing() {
     const int y = (int)(kCy + sinf(a) * 166.0f);
     const BadgeFace face = kMenuFaces[i];
     const bool on = face == badgeFace;
-    gfx->drawCircle(x, y, 42, on ? theme.accent : theme.line);
+    const uint16_t onCol =
+        isRainbowPalette() ? faceAccentColor((int)face) : theme.accent;
+    gfx->drawCircle(x, y, 42, on ? onCol : theme.line);
     const char *lab = kMenuLabels[i];
     // Slightly smaller type for longer labels (e.g. SYSTEM)
     const float sc = (strlen(lab) >= 6) ? 0.58f : 0.7f;
     const float tw = fontTextWidth(lab, sc);
-    drawFontTextAt(lab, x - tw * 0.5f, y + 5.0f, sc,
-                   on ? theme.accent : theme.fg);
+    drawFontTextAt(lab, x - tw * 0.5f, y + 5.0f, sc, on ? onCol : theme.fg);
   }
   // Close control — filled so it reads as a distinct button, not empty hole
   gfx->fillCircle(kCx, kCy, 56, theme.line);
@@ -1213,10 +1275,7 @@ void drawSchedule() {
 }
 
 uint16_t statusColor() {
-  const uint8_t t = kStatusTone[statusIdx % kStatusN];
-  if (t == 0) return theme.accent;
-  if (t == 1) return theme.dim;
-  return rgb32(kStatusToneRgb[t]);
+  return rgb32(kStatusColorRgb[statusIdx % kStatusN]);
 }
 
 void drawStatus() {
@@ -1683,6 +1742,7 @@ void commitFace(int i) {
   const BadgeFace prev = badgeFace;
   badgeFace = (BadgeFace)i;
   menuOpen = false;
+  if (isRainbowPalette()) applyFaceAccent((int)badgeFace);
   if (badgeFace != FACE_SYSTEM) {
     if (sysMode == SYS_LIST || sysMode == SYS_BUSY) WiFi.scanDelete();
     wifiScanCount = 0;
