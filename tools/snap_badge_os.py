@@ -39,6 +39,7 @@ FACES = [
     "ICEBREAKER",
     "ARCADE",
     "RADAR",
+    "RECORDER",
     "SETTINGS",
 ]
 

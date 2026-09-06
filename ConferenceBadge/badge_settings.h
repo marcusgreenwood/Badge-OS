@@ -115,23 +115,25 @@ enum BadgeFace : uint8_t {
   FACE_ICEBREAKER,
   FACE_ARCADE,
   FACE_RADAR,
+  FACE_RECORDER,
   FACE_SETTINGS,
   FACE_COUNT
 };
 
 static const char *const kFaceCode[FACE_COUNT] = {
-    "IDENTITY", "CONNECT", "SCHEDULE", "STATUS", "INBOX",
-    "SYSTEM",   "ICEBREAKER", "ARCADE", "RADAR", "SETTINGS",
+    "IDENTITY", "CONNECT", "SCHEDULE", "STATUS", "INBOX", "SYSTEM",
+    "ICEBREAKER", "ARCADE", "RADAR", "RECORDER", "SETTINGS",
 };
 
 static const char *const kFaceShort[FACE_COUNT] = {
-    "ID", "QR", "NEXT", "STAT", "INBOX", "SYS", "ASK", "PLAY", "NEAR", "SET",
+    "ID", "QR", "NEXT", "STAT", "INBOX", "SYS",
+    "ASK", "PLAY", "NEAR", "REC", "SET",
 };
 
 static const char *const kFaceTop[FACE_COUNT] = {
     "BADGE OS",        "SCAN TO CONNECT", "NEXT SESSION", "AVAILABILITY",
     "INBOX",           "SYSTEM",          "ASK ME ABOUT", "HOTEL TOWER",
-    "NEARBY",          "SETTINGS",
+    "NEARBY",          "MEETING RECORDER", "SETTINGS",
 };
 
 #ifndef BADGE_CONNECT_BOT
@@ -142,5 +144,14 @@ static const char *const kFaceBot[FACE_COUNT] = {
     "SPEAKER - STAGE 2", BADGE_CONNECT_BOT, "STAGE 2 - YOU SPEAK",
     "SET BY MARCUS - 09:12", "BLE - DELIVERED 09:41", "14H REMAINING",
     "TAP TO SHUFFLE", "CONFERENCE LEADERBOARD", "BLE PROXIMITY - LIVE",
-    "STORED ON DEVICE",
+    "TAP TO START / STOP", "STORED ON DEVICE",
 };
+
+// Hold-menu shortcuts (not every dial face)
+static const BadgeFace kMenuFaces[] = {
+    FACE_IDENTITY, FACE_CONNECT, FACE_RECORDER, FACE_SETTINGS, FACE_SYSTEM,
+};
+static const char *const kMenuLabels[] = {
+    "BADGE", "QR", "REC", "SET", "SYSTEM",
+};
+static const int kMenuN = (int)(sizeof(kMenuFaces) / sizeof(kMenuFaces[0]));

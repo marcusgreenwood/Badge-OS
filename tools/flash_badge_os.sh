@@ -6,7 +6,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/ConferenceBadge/build"
 ESPTOOL="${ESPTOOL:-$HOME/Library/Arduino15/packages/esp32/tools/esptool_py/5.3.0/esptool}"
 PORT="${1:-/dev/cu.usbmodem1101}"
-FQBN="esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,CDCOnBoot=cdc"
+# Use a large app partition scheme for the compile size check; the unified
+# table (factory @ 2MB) is what actually gets flashed.
+FQBN="esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=huge_app,PSRAM=opi,CDCOnBoot=cdc"
 LIBS="$ROOT/libraries"
 
 echo "==> compile"

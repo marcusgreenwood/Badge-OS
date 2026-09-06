@@ -47,7 +47,7 @@ static inline bool powerIsCharging() {
 static inline void powerButtonTick() {
   if (!__pmuOk) return;
   static uint32_t lastPoll = 0;
-  if (millis() - lastPoll < 150) return;
+  if (millis() - lastPoll < 250) return;
   lastPoll = millis();
   __pmu.getIrqStatus();
   if (__pmu.isPekeyShortPressIrq()) {

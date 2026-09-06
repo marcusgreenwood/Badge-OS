@@ -13,11 +13,14 @@
 #include <Arduino.h>
 #include "power_button.h"
 #include "badge_settings.h"
+#include "badge_mic.h"
 #include "qr_halftone.h"
 #include <Wire.h>
 #include <Preferences.h>
+#include <WiFi.h>
 #include <Arduino_GFX_Library.h>
 #include "badge_fonts.h"
+#include "badge_keyboard.h"
 #include "company_mark.h"
 #include "TouchDrvCSTXXX.hpp"
 #include "SensorQMI8658.hpp"
@@ -61,6 +64,9 @@ constexpr int16_t kCx = LCD_WIDTH / 2;
 constexpr int16_t kCy = LCD_HEIGHT / 2;
 constexpr float kOuterR = 224.0f;
 constexpr float kCirc = 2.0f * (float)M_PI * kOuterR;
+// Content rings: only two sizes (gauge vs filled disc)
+constexpr int kContentR = 156;  // next session, battery, radar
+constexpr int kDiscR = 172;     // QR / large filled disc (clear of rim labels)
 // Middle disc = face action; outside this radius = advance to next face
 constexpr int16_t kActionR = 148;
 constexpr size_t kFbBytes = (size_t)LCD_WIDTH * LCD_HEIGHT * sizeof(uint16_t);
@@ -78,6 +84,21 @@ uint32_t lastInteractionMs = 0;
 uint32_t animStartMs = 0;
 bool doomBootTried = false;
 
+// AMOLED brightness — first touch while dimmed only wakes the screen
+constexpr uint8_t kBrightFull = 220;
+uint8_t displayBright = kBrightFull;
+bool wakeConsumeTouch = false;
+
+// Rim position-indicator slide before face content changes
+constexpr uint32_t kFaceAnimMs = 280;
+bool faceAnimActive = false;
+uint32_t faceAnimStartMs = 0;
+float faceAnimFrom = 0.0f;
+float faceAnimTo = 0.0f;
+int faceAnimTarget = 0;
+float faceAnimPrevPos = 0.0f;
+bool faceAnimPrevValid = false;
+
 // Theme (NVS overrides seed from badge_settings.h)
 uint8_t cfgSurface = BADGE_SURFACE;
 uint8_t cfgPalette = BADGE_PALETTE;
@@ -90,6 +111,31 @@ int8_t btnFlashId = -1;  // 0=later/prev, 1=accept/next
 
 // Radar sweep
 float radarAngle = 0;
+
+// Meeting recorder
+bool recActive = false;
+uint32_t recStartMs = 0;
+uint32_t recLastMs = 0;
+uint16_t recCount = 0;
+float recBars[9] = {0};
+
+// System / Wi‑Fi UI
+enum SysMode : uint8_t {
+  SYS_HOME = 0,
+  SYS_LIST,
+  SYS_PASS,
+  SYS_BUSY,
+};
+SysMode sysMode = SYS_HOME;
+RoundKeyboard wifiKb;
+char wifiSsid[33] = "";
+char wifiPass[65] = "";
+char wifiStatus[40] = "";
+int wifiScanCount = 0;
+int wifiListOffset = 0;
+uint32_t wifiBusySince = 0;
+constexpr int kWifiListVisible = 4;
+constexpr int kWifiMaxAps = 12;
 
 struct Theme {
   uint16_t page, bg, fg, dim, faint, line, line2, line3, accent, ink, disc, hover,
@@ -105,6 +151,19 @@ enum GestureEvent {
   GESTURE_HOLD_DOOM   // fifth rim lap complete → doom
 };
 
+void setDisplayBrightness(uint8_t level) {
+  if (level == displayBright) return;
+  displayBright = level;
+  panel->setBrightness(displayBright);
+}
+
+bool displayIsDimmed() { return displayBright < kBrightFull; }
+
+void wakeDisplay() {
+  setDisplayBrightness(kBrightFull);
+  lastInteractionMs = millis();
+}
+
 bool touchDown = false;
 bool holdCandidate = false;
 bool holdArmed = false;
@@ -117,7 +176,7 @@ volatile bool touchPending = false;
 uint32_t lastTouchReportMs = 0;
 
 constexpr uint32_t kHoldArmMs = 200;    // debounce before rim arc starts
-constexpr uint32_t kHoldLapMs = 2000;   // one full circle around the bezel
+constexpr uint32_t kHoldLapMs = 1000;   // one full circle around the bezel
 constexpr uint32_t kHoldPauseMs = 500;  // dwell on completed ring before next lap
 constexpr uint32_t kLiftQuietMs = 120;
 constexpr int kHoldDoomLaps = 5;
@@ -125,6 +184,9 @@ constexpr int kHoldDoomLaps = 5;
 uint16_t *holdSnap = nullptr;
 bool holdSnapValid = false;
 float holdLaps = 0.0f;
+float holdPrevLaps = 0.0f;
+bool holdPrevValid = false;
+bool holdNeedFullFlush = false;
 bool holdMenuFired = false;
 
 // Doom fire
@@ -134,6 +196,21 @@ uint16_t firePal[13];
 
 float clampf(float v, float lo, float hi) {
   return v < lo ? lo : (v > hi ? hi : v);
+}
+
+// Smooth ease-in-out (cubic) — softer start/stop than smoothstep
+float easeInOut(float t) {
+  t = clampf(t, 0.0f, 1.0f);
+  return t < 0.5f ? 4.0f * t * t * t
+                  : 1.0f - powf(-2.0f * t + 2.0f, 3.0f) * 0.5f;
+}
+
+float faceIndicatorPos() {
+  if (!faceAnimActive) return (float)badgeFace;
+  const float t =
+      (float)(millis() - faceAnimStartMs) / (float)kFaceAnimMs;
+  const float e = easeInOut(t);
+  return faceAnimFrom + (faceAnimTo - faceAnimFrom) * e;
 }
 
 static uint16_t *allocFb(const char *tag) {
@@ -315,6 +392,61 @@ void persistTheme() {
   badge.end();
 }
 
+void loadWifiCreds() {
+  Preferences w;
+  if (!w.begin("wifi", true)) return;
+  String ssid = w.getString("ssid", "");
+  String pass = w.getString("pass", "");
+  w.end();
+  strncpy(wifiSsid, ssid.c_str(), sizeof(wifiSsid) - 1);
+  strncpy(wifiPass, pass.c_str(), sizeof(wifiPass) - 1);
+  wifiSsid[sizeof(wifiSsid) - 1] = 0;
+  wifiPass[sizeof(wifiPass) - 1] = 0;
+}
+
+void saveWifiCreds() {
+  Preferences w;
+  if (!w.begin("wifi", false)) return;
+  w.putString("ssid", wifiSsid);
+  w.putString("pass", wifiPass);
+  w.end();
+}
+
+void wifiRadioOff() {
+  WiFi.scanDelete();
+  wifiScanCount = 0;
+  WiFi.disconnect(true, true);
+  WiFi.mode(WIFI_OFF);
+}
+
+void wifiTryConnect() {
+  if (wifiSsid[0] == 0) return;
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(true);
+  WiFi.disconnect(true, true);
+  delay(50);
+  WiFi.begin(wifiSsid, wifiPass);
+  sysMode = SYS_BUSY;
+  wifiBusySince = millis();
+  snprintf(wifiStatus, sizeof(wifiStatus), "CONNECTING…");
+  faceDirty = true;
+}
+
+void wifiStartScan() {
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(true);
+  WiFi.disconnect(false);
+  wifiScanCount = 0;
+  wifiListOffset = 0;
+  sysMode = SYS_BUSY;
+  wifiBusySince = millis();
+  snprintf(wifiStatus, sizeof(wifiStatus), "SCANNING…");
+  faceDirty = true;
+  WiFi.scanNetworks(true);
+}
+
 void persistTowerBest() {
   // Hotel Tower owns this key; badge only reads it.
 }
@@ -380,8 +512,10 @@ void enterDoom() {
   touchDown = false;
   holdArmed = false;
   holdSnapValid = false;
+  holdPrevValid = false;
   holdMenuFired = false;
   holdLaps = 0.0f;
+  setCpuFrequencyMhz(160);
   menuOpen = false;
   fireInit();
   animStartMs = millis();
@@ -473,9 +607,10 @@ void drawRotatedGfxChar(float cx, float cy, char ch, float angleRad,
   // same baseline row (stops 1px bob from fractional bilinear phase).
   if (axis) {
     const int destX = (int)lroundf(cx + xOff * local);
-    const int destY = (int)lroundf(cy + yOff * local);
-    const int destW = max(1, (int)lroundf((float)g->width * local));
-    const int destH = max(1, (int)lroundf((float)g->height * local));
+    // Floor top when rising above baseline so AA tips aren't clipped
+    const int destY = (int)floorf(cy + yOff * local);
+    const int destW = max(1, (int)ceilf((float)g->width * local));
+    const int destH = max(1, (int)ceilf((float)g->height * local));
     const bool neat = (destW == g->width && destH == g->height);
     for (int yy = 0; yy < destH; yy++) {
       const int iy = destY + yy;
@@ -728,6 +863,9 @@ void drawCompanyMark(int cx, int cy, int h) {
 }
 
 void drawIdentity() {
+  // Presence dot — same status colour as the Availability face
+  gfx->fillCircle(kCx, kCy - 133, 21, statusColor());
+
   // Design name ~56px → scale 2.0 vs master 28; picks 42px bake (~1.33×)
   float nameScale = 2.0f;
   while (nameScale > 1.4f && fontTextWidth(BADGE_NAME_L2, nameScale) > 340.0f)
@@ -810,16 +948,118 @@ void drawDialTicks() {
   }
 }
 
-void drawProgressArc() {
-  const float seg = kCirc / (float)FACE_COUNT;
-  const float dash = seg - 8.0f;
+void drawRimTrack() {
   gfx->drawCircle(kCx, kCy, (int)kOuterR, theme.line2);
   gfx->drawCircle(kCx, kCy, (int)kOuterR - 1, theme.line2);
+}
+
+void drawFaceIndicator(float pos) {
+  const float seg = kCirc / (float)FACE_COUNT;
+  const float dash = seg - 8.0f;
   // 12 o'clock, then clockwise as the face index increases
-  const float startDeg = -90.0f + (float)badgeFace * (360.0f / FACE_COUNT);
+  const float startDeg = -90.0f + pos * (360.0f / FACE_COUNT);
   const float spanDeg = (dash / kCirc) * 360.0f;
   gfx->fillArc(kCx, kCy, (int)kOuterR + 1, (int)kOuterR - 2, startDeg,
                startDeg + spanDeg, theme.accent);
+}
+
+// Axis-aligned bounds of the sliding rim dash (padded for fillArc coverage)
+void faceIndicatorBounds(float pos, int *ox, int *oy, int *ow, int *oh) {
+  const float seg = kCirc / (float)FACE_COUNT;
+  const float dash = seg - 8.0f;
+  const float startDeg = -90.0f + pos * (360.0f / FACE_COUNT);
+  const float spanDeg = (dash / kCirc) * 360.0f;
+  const float rIn = kOuterR - 5.0f;
+  const float rOut = kOuterR + 4.0f;
+  int minx = LCD_WIDTH, miny = LCD_HEIGHT, maxx = 0, maxy = 0;
+  for (int i = 0; i <= 12; i++) {
+    const float deg = startDeg + spanDeg * (float)i / 12.0f;
+    const float rad = deg * (float)M_PI / 180.0f;
+    const float c = cosf(rad), s = sinf(rad);
+    for (int k = 0; k < 2; k++) {
+      const float r = (k == 0) ? rIn : rOut;
+      const int x = kCx + (int)(c * r);
+      const int y = kCy + (int)(s * r);
+      if (x < minx) minx = x;
+      if (y < miny) miny = y;
+      if (x > maxx) maxx = x;
+      if (y > maxy) maxy = y;
+    }
+  }
+  minx = max(0, minx - 12);
+  miny = max(0, miny - 12);
+  maxx = min(LCD_WIDTH - 1, maxx + 12);
+  maxy = min(LCD_HEIGHT - 1, maxy + 12);
+  *ox = minx;
+  *oy = miny;
+  *ow = maxx - minx + 1;
+  *oh = maxy - miny + 1;
+}
+
+void blitSnapRect(int x, int y, int w, int h) {
+  if (!holdSnap || w <= 0 || h <= 0) return;
+  uint16_t *fb = gfx->getFramebuffer();
+  if (!fb) return;
+  for (int row = y; row < y + h; row++) {
+    memcpy(fb + row * LCD_WIDTH + x, holdSnap + row * LCD_WIDTH + x,
+           (size_t)w * sizeof(uint16_t));
+  }
+}
+
+// Push only a sub-rect to the panel — width must be even (QSPI writePixels
+// pairs pixels; odd widths mis-clock the panel and corrupt GRAM).
+void flushFbRect(int x, int y, int w, int h) {
+  if (w <= 0 || h <= 0) return;
+  uint16_t *fb = gfx->getFramebuffer();
+  if (!fb) return;
+  // QSPI writePixels clocks pairs — keep x and w even
+  if (x & 1) {
+    x--;
+    w++;
+  }
+  if (w & 1) {
+    if (x + w < LCD_WIDTH) w++;
+    else if (x > 0) {
+      x--;
+      w++;
+    }
+  }
+  if (x < 0) {
+    w += x;
+    x = 0;
+  }
+  if (x + w > LCD_WIDTH) w = LCD_WIDTH - x;
+  if (y < 0) {
+    h += y;
+    y = 0;
+  }
+  if (y + h > LCD_HEIGHT) h = LCD_HEIGHT - y;
+  if (w <= 0 || h <= 0) return;
+  if (w & 1) w--;  // last resort
+  if (w <= 0) return;
+
+  static uint16_t *strip = nullptr;
+  static size_t stripCap = 0;
+  const size_t need = (size_t)w * (size_t)h;
+  if (need > stripCap) {
+    free(strip);
+    strip = (uint16_t *)malloc(need * sizeof(uint16_t));
+    stripCap = strip ? need : 0;
+  }
+  if (!strip) {
+    gfx->flush();
+    return;
+  }
+  for (int row = 0; row < h; row++) {
+    memcpy(strip + row * w, fb + (y + row) * LCD_WIDTH + x,
+           (size_t)w * sizeof(uint16_t));
+  }
+  panel->draw16bitRGBBitmap(x, y, strip, w, h);
+}
+
+void drawProgressArc() {
+  drawRimTrack();
+  drawFaceIndicator(faceIndicatorPos());
 }
 
 void drawRimLabels() {
@@ -840,27 +1080,31 @@ void drawMenuRing() {
   // Fully opaque overlay — hide the page underneath
   gfx->fillCircle(kCx, kCy, 233, theme.bg);
   gfx->drawCircle(kCx, kCy, 166, theme.line2);
-  for (int n = 0; n < FACE_COUNT; n++) {
+  for (int i = 0; i < kMenuN; i++) {
     const float a =
-        (n / (float)FACE_COUNT) * 2.0f * (float)M_PI - (float)M_PI / 2;
+        (i / (float)kMenuN) * 2.0f * (float)M_PI - (float)M_PI / 2;
     const int x = (int)(kCx + cosf(a) * 166.0f);
     const int y = (int)(kCy + sinf(a) * 166.0f);
-    const bool on = n == (int)badgeFace;
+    const BadgeFace face = kMenuFaces[i];
+    const bool on = face == badgeFace;
     gfx->drawCircle(x, y, 42, on ? theme.accent : theme.line);
-    const char *lab = kFaceShort[n];
-    const float sc = 0.75f;
+    const char *lab = kMenuLabels[i];
+    // Slightly smaller type for longer labels (e.g. SYSTEM)
+    const float sc = (strlen(lab) >= 6) ? 0.58f : 0.7f;
     const float tw = fontTextWidth(lab, sc);
     drawFontTextAt(lab, x - tw * 0.5f, y + 5.0f, sc,
                    on ? theme.accent : theme.fg);
   }
-  gfx->drawCircle(kCx, kCy, 56, theme.line);
-  drawFontTextCX("CLOSE", kCy + 6.0f, 0.85f, theme.dim);
+  // Close control — filled so it reads as a distinct button, not empty hole
+  gfx->fillCircle(kCx, kCy, 56, theme.line);
+  gfx->drawCircle(kCx, kCy, 56, theme.faint);
+  drawFontTextCX("CLOSE", kCy + 6.0f, 0.85f, theme.fg);
 }
 
 void drawConnect() {
   // Sized for camera scan without crowding rim labels.
   // Finder corners stay inside the disc; quiet zone from disc ground.
-  const int discR = 172;
+  const int discR = kDiscR;
   const int qrSize = 236;
   const int ox = kCx - qrSize / 2;
   const int oy = kCy - qrSize / 2;
@@ -875,8 +1119,8 @@ void drawConnect() {
   uint16_t *fb = gfx->getFramebuffer();
   if (!fb) return;
 
-  gfx->fillCircle(kCx, kCy, discR + 1, theme.line);
   gfx->fillCircle(kCx, kCy, discR, groundCol);
+  gfx->drawCircle(kCx, kCy, discR, theme.line);
 
   // Mock QR lattice in the disc caps (outside the QR square, inside discR) —
   // same expansion look as the old full-circle QR screen.
@@ -955,13 +1199,13 @@ void drawConnect() {
 }
 
 void drawSchedule() {
-  const int R = 146;
+  const int R = kContentR;
   gfx->drawCircle(kCx, kCy, R, theme.line2);
   gfx->drawCircle(kCx, kCy, R - 1, theme.line2);
   const float pct = BADGE_SESSION_PCT / 100.0f;
   const float span = pct * 360.0f;
   gfx->fillArc(kCx, kCy, R + 2, R - 4, -90.0f, -90.0f + span, theme.accent);
-  drawFontTextCX(BADGE_SESSION_TIME, kCy - 40.0f, 2.45f, theme.fg);
+  drawBigSessionTime(BADGE_SESSION_TIME, kCy - 40.0f, 2.45f, theme.fg);
   drawFontTextCX(BADGE_SESSION_IN, kCy + 28.0f, 0.7f, theme.accent);
   gfx->drawFastHLine(kCx - 60, kCy + 42, 120, theme.line);
   drawFontTextCX("AGENTIC BROWSING", kCy + 68.0f, 0.9f, theme.fg);
@@ -996,41 +1240,199 @@ void drawStatus() {
 void drawInbox() {
   if (notifIdx >= kNotifN) {
     drawFontTextCX("ALL CLEAR", kCy - 20.0f, 1.8f, theme.faint);
-  } else {
-    drawFontTextCX(kNotifs[notifIdx].name, kCy - 70.0f, 1.7f, theme.fg);
-    // Wide max so short bodies stay on one line; wrap only if needed.
-    drawWrappedFontCX(kNotifs[notifIdx].body, kCy - 18.0f, 0.95f, theme.dim,
-                      340);
+    return;
   }
+  drawFontTextCX(kNotifs[notifIdx].name, kCy - 70.0f, 1.7f, theme.fg);
+  // Wide max so short bodies stay on one line; wrap only if needed.
+  drawWrappedFontCX(kNotifs[notifIdx].body, kCy - 18.0f, 0.95f, theme.dim,
+                    340);
   drawRoundBtn(kCx - 126, kCy + 42, 118, 64, theme.bg, theme.line, "LATER",
                theme.dim, 0);
   drawRoundBtn(kCx + 8, kCy + 42, 118, 64, theme.accent, theme.accent, "ACCEPT",
                theme.ink, 1);
 }
 
-void drawSystem() {
+void drawSystemHome() {
   int pct = powerBatteryPercent();
   if (pct < 0) pct = 78;
-  const int R = 143;
+  const int R = kContentR;
   gfx->fillArc(kCx, kCy, R + 4, R - 6, 115.0f, 115.0f + 240.0f, theme.line2);
   const float span = 240.0f * (pct / 100.0f);
   gfx->fillArc(kCx, kCy, R + 4, R - 6, 115.0f, 115.0f + span, theme.accent);
   char buf[8];
   snprintf(buf, sizeof(buf), "%d%%", pct);
-  drawFontTextCX(buf, kCy - 36.0f, 2.5f, theme.fg);
-  gfx->drawFastHLine(kCx - 83, kCy + 16, 166, theme.line);
-  const float rowX = kCx - 83;
-  const float rowR = kCx + 83;
-  float y = kCy + 42.0f;
-  const float sc = 0.85f;
-  drawFontTextLeft("BLE", rowX, y, sc, theme.faint);
-  drawFontTextRight("4 PAIRED", rowR, y, sc, theme.accent);
-  y += 26;
-  drawFontTextLeft("WIFI", rowX, y, sc, theme.faint);
-  drawFontTextRight(BADGE_WIFI_LABEL, rowR, y, sc, theme.fg);
-  y += 26;
-  drawFontTextLeft("SYNC", rowX, y, sc, theme.faint);
-  drawFontTextRight("2 MIN", rowR, y, sc, theme.fg);
+  drawFontTextCX(buf, kCy - 56.0f, 2.2f, theme.fg);
+
+  // Wi‑Fi card — sized to sit inside the battery ring chord
+  const int cardY = kCy + 20;
+  const int cardH = 88;
+  const int cardHalf = 110;  // width 220; corners stay inside kContentR
+  const int cardX = kCx - cardHalf;
+  const int cardW = cardHalf * 2;
+  gfx->fillRoundRect(cardX, cardY, cardW, cardH, 16, theme.line2);
+  drawFontTextLeft("WIFI", (float)(cardX + 16), cardY + 32.0f, 0.75f,
+                   theme.faint);
+  wl_status_t st = WiFi.status();
+  if (st == WL_CONNECTED) {
+    drawFontTextLeft(WiFi.SSID().c_str(), (float)(cardX + 16), cardY + 62.0f,
+                     0.85f, theme.fg);
+  } else if (wifiSsid[0]) {
+    drawFontTextLeft(wifiSsid, (float)(cardX + 16), cardY + 62.0f, 0.85f,
+                     theme.dim);
+  } else {
+    drawFontTextLeft("NOT CONNECTED", (float)(cardX + 16), cardY + 62.0f, 0.85f,
+                     theme.dim);
+  }
+  drawFontTextRight("EDIT", (float)(cardX + cardW - 16), cardY + 48.0f, 0.75f,
+                    theme.accent);
+
+  if (st != WL_CONNECTED) {
+    drawFontTextCX("TAP WIFI TO SCAN / JOIN", kCy + 140.0f, 0.65f, theme.faint);
+  }
+}
+
+void drawWifiList() {
+  drawFontTextCX("NETWORKS", kCy - 150.0f, 0.85f, theme.dim);
+  const int n = wifiScanCount < kWifiMaxAps ? wifiScanCount : kWifiMaxAps;
+  if (n <= 0) {
+    drawFontTextCX("NO NETWORKS", kCy - 20.0f, 1.2f, theme.faint);
+  } else {
+    for (int i = 0; i < kWifiListVisible; i++) {
+      const int idx = wifiListOffset + i;
+      if (idx >= n) break;
+      const int rowY = kCy - 110 + i * 52;
+      gfx->fillRoundRect(kCx - 160, rowY, 320, 46, 14, theme.line2);
+      String ssid = WiFi.SSID(idx);
+      char line[28];
+      strncpy(line, ssid.c_str(), sizeof(line) - 1);
+      line[sizeof(line) - 1] = 0;
+      drawFontTextLeft(line, kCx - 140.0f, rowY + 30.0f, 0.85f, theme.fg);
+      char rssi[8];
+      snprintf(rssi, sizeof(rssi), "%ddB", WiFi.RSSI(idx));
+      drawFontTextRight(rssi, kCx + 140.0f, rowY + 30.0f, 0.7f, theme.faint);
+    }
+  }
+  // Scroll hints
+  if (wifiListOffset > 0)
+    drawFontTextCX("^", kCy - 130.0f, 0.8f, theme.accent);
+  if (wifiListOffset + kWifiListVisible < n)
+    drawFontTextCX("v", kCy + 110.0f, 0.8f, theme.accent);
+  drawRoundBtn(kCx - 70, kCy + 130, 140, 44, theme.bg, theme.line, "BACK",
+               theme.dim, -1);
+}
+
+void drawWifiPass() {
+  // Compact header so the QWERTY fills most of the circle
+  drawFontTextCX(wifiSsid, kCy - 198.0f, 0.7f, theme.dim);
+  gfx->fillRoundRect(kCx - 170, kCy - 178, 340, 40, 12, theme.line2);
+  const char *shown = wifiKb.text[0] ? wifiKb.text : "PASSWORD";
+  const uint16_t col = wifiKb.text[0] ? theme.fg : theme.faint;
+  drawFontTextCX(shown, kCy - 151.0f, 0.95f, col);
+
+  kbBuildLayout(&wifiKb, kCy - 118);
+  for (int i = 0; i < gKbKeyN; i++) {
+    const KbKey &k = gKbKeys[i];
+    const bool accentKey = (k.code == KB_OK);
+    const bool shiftOn = (k.code == KB_SHIFT && wifiKb.shift);
+    const uint16_t fill = (accentKey || shiftOn) ? theme.accent : theme.line2;
+    const uint16_t tc = (accentKey || shiftOn) ? theme.ink : theme.fg;
+    gfx->fillRoundRect(k.x, k.y, k.w, k.h, 10, fill);
+    gfx->drawRoundRect(k.x, k.y, k.w, k.h, 10, theme.line);
+    const float sc = (strlen(k.label) > 2) ? 0.65f : 0.95f;
+    const float tw = fontTextWidth(k.label, sc);
+    drawFontTextAt(k.label, k.x + (k.w - tw) * 0.5f, k.y + k.h * 0.70f, sc,
+                   tc);
+  }
+}
+
+void drawWifiBusy() {
+  drawFontTextCX(wifiStatus, kCy - 10.0f, 1.2f, theme.fg);
+  drawFontTextCX("PLEASE WAIT", kCy + 40.0f, 0.75f, theme.faint);
+}
+
+void drawSystem() {
+  switch (sysMode) {
+    case SYS_LIST: drawWifiList(); break;
+    case SYS_PASS: drawWifiPass(); break;
+    case SYS_BUSY: drawWifiBusy(); break;
+    case SYS_HOME:
+    default: drawSystemHome(); break;
+  }
+}
+
+void handleSystemTap() {
+  if (sysMode == SYS_BUSY) return;
+
+  if (sysMode == SYS_HOME) {
+    if (tapIsOuter()) {
+      cycleFaceFromTap();
+      return;
+    }
+    // Wi‑Fi card
+    if (tapInRect(kCx - 110, kCy + 20, 220, 88)) {
+      wifiStartScan();
+      return;
+    }
+    cycleFaceFromTap();
+    return;
+  }
+
+  if (sysMode == SYS_LIST) {
+    if (tapInRect(kCx - 70, kCy + 130, 140, 44)) {
+      WiFi.scanDelete();
+      wifiScanCount = 0;
+      sysMode = SYS_HOME;
+      faceDirty = true;
+      return;
+    }
+    const int n = wifiScanCount < kWifiMaxAps ? wifiScanCount : kWifiMaxAps;
+    // Scroll zones
+    if (tapY < kCy - 120 && wifiListOffset > 0) {
+      wifiListOffset--;
+      faceDirty = true;
+      return;
+    }
+    if (tapY > kCy + 90 && wifiListOffset + kWifiListVisible < n) {
+      wifiListOffset++;
+      faceDirty = true;
+      return;
+    }
+    for (int i = 0; i < kWifiListVisible; i++) {
+      const int idx = wifiListOffset + i;
+      if (idx >= n) break;
+      const int rowY = kCy - 110 + i * 52;
+      if (tapInRect(kCx - 160, rowY, 320, 46)) {
+        String ssid = WiFi.SSID(idx);
+        const bool same = (strcmp(wifiSsid, ssid.c_str()) == 0);
+        strncpy(wifiSsid, ssid.c_str(), sizeof(wifiSsid) - 1);
+        wifiSsid[sizeof(wifiSsid) - 1] = 0;
+        WiFi.scanDelete();  // SSID already copied; free scan buffers
+        wifiScanCount = 0;
+        kbInit(&wifiKb);
+        if (same && wifiPass[0]) kbSet(&wifiKb, wifiPass);
+        else wifiPass[0] = 0;
+        sysMode = SYS_PASS;
+        faceDirty = true;
+        return;
+      }
+    }
+    return;
+  }
+
+  if (sysMode == SYS_PASS) {
+    kbBuildLayout(&wifiKb, kCy - 118);
+    const int code = kbHit(tapX, tapY);
+    if (code == KB_NONE) return;
+    if (code == KB_OK) {
+      strncpy(wifiPass, wifiKb.text, sizeof(wifiPass) - 1);
+      wifiPass[sizeof(wifiPass) - 1] = 0;
+      saveWifiCreds();
+      wifiTryConnect();
+      return;
+    }
+    kbApply(&wifiKb, code);
+    faceDirty = true;
+  }
 }
 
 void drawIcebreaker() {
@@ -1066,29 +1468,24 @@ void drawArcade() {
 }
 
 void drawRadar() {
-  gfx->drawCircle(kCx, kCy, 150, theme.line2);
-  gfx->drawCircle(kCx, kCy, 98, theme.line3);
-  gfx->drawCircle(kCx, kCy, 46, theme.line3);
-  // Sweep wedge
+  gfx->drawCircle(kCx, kCy, kContentR, theme.line2);
+  gfx->drawCircle(kCx, kCy, kContentR * 2 / 3, theme.line3);
+  gfx->drawCircle(kCx, kCy, kContentR / 3, theme.line3);
+  // Sweep wedge — coarser step for lower CPU (still reads as a soft fan)
   const float a0 = radarAngle;
-  for (int i = 0; i < 22; i++) {
-    const float a = a0 + i * 3.0f;
+  for (int i = 0; i < 12; i++) {
+    const float a = a0 + i * 5.0f;
     const float rad = a * (float)M_PI / 180.0f;
-    const uint8_t alpha = (uint8_t)(180 - i * 8);
-    const int x1 = kCx + (int)(cosf(rad) * 150);
-    const int y1 = kCy + (int)(sinf(rad) * 150);
+    const uint8_t alpha = (uint8_t)(180 - i * 12);
     uint16_t *fb = gfx->getFramebuffer();
     if (!fb) continue;
-    // soft line by plotting along radius
-    for (int r = 20; r < 150; r += 2) {
+    for (int r = 24; r < kContentR; r += 3) {
       const int x = kCx + (int)(cosf(rad) * r);
       const int y = kCy + (int)(sinf(rad) * r);
       if ((unsigned)x >= LCD_WIDTH || (unsigned)y >= LCD_HEIGHT) continue;
       fb[y * LCD_WIDTH + x] =
           blend565(theme.accent, fb[y * LCD_WIDTH + x], alpha / 3);
     }
-    (void)x1;
-    (void)y1;
   }
   for (int i = 0; i < kRadarN; i++) {
     const float a = kRadar[i].angleDeg * (float)M_PI / 180.0f;
@@ -1103,6 +1500,117 @@ void drawRadar() {
   snprintf(nbuf, sizeof(nbuf), "%d", kRadarN);
   drawFontTextCX(nbuf, kCy + 4.0f, 2.4f, theme.fg);
   drawFontTextCX("NEARBY", kCy + 36.0f, 0.75f, theme.dim);
+}
+
+static uint32_t recorderElapsedMs() {
+  if (recActive) return millis() - recStartMs;
+  return recLastMs;
+}
+
+// Large HH:MM / MM:SS with drawn colon dots — baked ':' glyphs clip when upscaled
+static void drawBigColonTime(const char *left, const char *right, float baselineY,
+                             float scale, uint16_t color) {
+  const BadgeSmoothFont *f = pickSmoothFont(scale);
+  const float local = smoothLocalScale(f, scale);
+  float asc = 30.0f * local;
+  if (f && (uint8_t)'0' >= f->first && (uint8_t)'0' <= f->last) {
+    const BadgeSmoothGlyph *g = &f->glyphs['0' - f->first];
+    asc = (float)(-g->yOffset) * local;
+  }
+  const float lw = fontTextWidth(left, scale);
+  const float rw = fontTextWidth(right, scale);
+  const float colonGap = max(18.0f, local * 14.0f);
+  const float total = lw + colonGap + rw;
+  const float x0 = kCx - total * 0.5f;
+  drawFontTextAt(left, x0, baselineY, scale, color);
+
+  const int dotR = max(4, (int)lroundf(local * 3.6f));
+  const int cx = (int)lroundf(x0 + lw + colonGap * 0.5f);
+  const int topY = (int)lroundf(baselineY - asc * 0.70f);
+  const int botY = (int)lroundf(baselineY - asc * 0.28f);
+  gfx->fillCircle(cx, topY, dotR, color);
+  gfx->fillCircle(cx, botY, dotR, color);
+
+  drawFontTextAt(right, x0 + lw + colonGap, baselineY, scale, color);
+}
+
+static void drawBigClock(uint32_t ms, float baselineY, float scale,
+                         uint16_t color) {
+  char mm[4], ss[4];
+  const uint32_t sec = ms / 1000;
+  snprintf(mm, sizeof(mm), "%02lu", (unsigned long)(sec / 60));
+  snprintf(ss, sizeof(ss), "%02lu", (unsigned long)(sec % 60));
+  drawBigColonTime(mm, ss, baselineY, scale, color);
+}
+
+static void drawBigSessionTime(const char *timeStr, float baselineY, float scale,
+                               uint16_t color) {
+  const char *colon = strchr(timeStr, ':');
+  if (!colon || colon == timeStr || !colon[1]) {
+    drawFontTextCX(timeStr, baselineY, scale, color);
+    return;
+  }
+  char left[8];
+  const size_t n = (size_t)(colon - timeStr);
+  if (n >= sizeof(left)) {
+    drawFontTextCX(timeStr, baselineY, scale, color);
+    return;
+  }
+  memcpy(left, timeStr, n);
+  left[n] = 0;
+  drawBigColonTime(left, colon + 1, baselineY, scale, color);
+}
+
+void drawRecorder() {
+  const uint16_t recRed = rgb(0xE2, 0x2B, 0x2B);
+  const uint32_t elapsed = recorderElapsedMs();
+  const bool hasSd = BadgeMic::storageOk();
+
+  BadgeMic::getLevels(recBars, 9, nullptr);
+
+  // Status — hide READY when there's nowhere to save
+  if (recActive) {
+    const bool blink = ((millis() / 400) & 1) != 0;
+    gfx->fillCircle(kCx - 78, kCy - 118, 10, blink ? recRed : theme.line);
+    drawFontTextCX("RECORDING", kCy - 112.0f, 0.85f, recRed);
+  } else if (hasSd) {
+    drawFontTextCX("READY", kCy - 112.0f, 0.85f, theme.dim);
+  }
+
+  drawBigClock(elapsed, kCy - 42.0f, 2.6f, theme.fg);
+
+  // Live mic level meter
+  const int bars = 9;
+  const int gap = 10;
+  const int barW = 14;
+  const int totalW = bars * barW + (bars - 1) * gap;
+  int x0 = kCx - totalW / 2;
+  for (int i = 0; i < bars; i++) {
+    const float level = recBars[i];
+    const int h = (int)(14 + level * 58);
+    const int y = kCy + 28 - h / 2;
+    const uint16_t col = level > 0.75f ? recRed : (recActive ? theme.accent : theme.line);
+    gfx->fillRoundRect(x0 + i * (barW + gap), y, barW, h, 4, col);
+  }
+
+  if (BadgeMic::lastFile()[0]) {
+    const char *p = strrchr(BadgeMic::lastFile(), '/');
+    drawFontTextCX(p ? p + 1 : BadgeMic::lastFile(), kCy + 78.0f, 0.65f,
+                   theme.faint);
+  } else if (!hasSd) {
+    drawFontTextCX("INSERT SD TO SAVE", kCy + 78.0f, 0.65f, theme.faint);
+  }
+
+  if (recActive) {
+    gfx->fillRoundRect(kCx - 36, kCy + 100, 72, 48, 10, recRed);
+    gfx->fillRect(kCx - 12, kCy + 114, 24, 20, theme.ink);
+  } else if (hasSd) {
+    drawRoundBtn(kCx - 86, kCy + 100, 172, 52, theme.accent, theme.accent,
+                 "RECORD", theme.ink, 0);
+  } else {
+    drawRoundBtn(kCx - 86, kCy + 100, 172, 52, theme.line2, theme.line,
+                 "RECORD", theme.faint, -1);
+  }
 }
 
 // Shared settings list geometry — draw + hit must stay in lockstep.
@@ -1142,6 +1650,7 @@ void drawFaceContent() {
     case FACE_ICEBREAKER: drawIcebreaker(); break;
     case FACE_ARCADE: drawArcade(); break;
     case FACE_RADAR: drawRadar(); break;
+    case FACE_RECORDER: drawRecorder(); break;
     case FACE_SETTINGS: drawSettings(); break;
     default: break;
   }
@@ -1160,25 +1669,133 @@ void drawDoomAnim() {
   fireStep();
   fireDraw();
   const int dots = (millis() / 350) % 4;
-  char msg[16] = "lets see";
+  char msg[24] = "mode enabled";
   for (int i = 0; i < dots; i++) strcat(msg, ".");
-  drawTextCX(msg, 160, 3, RGB565_WHITE);
+  drawTextCX("Easter Egg", 144, 3, RGB565_WHITE);
+  drawTextCX(msg, 176, 3, RGB565_WHITE);
   gfx->flush();
 }
 
 // ---- navigation ---------------------------------------------------------
 
-void goFace(int i) {
+void commitFace(int i) {
   if (i < 0 || i >= FACE_COUNT) return;
+  const BadgeFace prev = badgeFace;
   badgeFace = (BadgeFace)i;
   menuOpen = false;
+  if (badgeFace != FACE_SYSTEM) {
+    if (sysMode == SYS_LIST || sysMode == SYS_BUSY) WiFi.scanDelete();
+    wifiScanCount = 0;
+    sysMode = SYS_HOME;
+  }
   if (badgeFace == FACE_CONNECT) bumpScanCount();
   if (badgeFace == FACE_ARCADE) refreshTowerBest();
+  // Mic capture only while on Recorder (or actively recording)
+  if (badgeFace == FACE_RECORDER) {
+    BadgeMic::resumeCapture();
+    BadgeMic::storageAvailable();  // probe SD for UI state
+  } else if (prev == FACE_RECORDER && !BadgeMic::isRecording())
+    BadgeMic::pauseCapture();
   faceDirty = true;
 }
 
+void startFaceAnim(int target, float fromPos, float toPos) {
+  if (faceAnimActive) return;
+  if (target < 0 || target >= FACE_COUNT) return;
+  if (target == (int)badgeFace) {
+    menuOpen = false;
+    faceDirty = true;
+    return;
+  }
+  faceAnimFrom = fromPos;
+  faceAnimTo = toPos;
+  faceAnimTarget = target;
+  menuOpen = false;
+
+  // Freeze the current face (no indicator) into a snapshot so each anim frame
+  // only restores pixels + paints the sliding dash — full redraws are too slow.
+  gfx->fillScreen(theme.bg);
+  drawDialTicks();
+  drawRimTrack();
+  drawRimLabels();
+  drawFaceContent();
+  captureHoldSnap();
+
+  // Push the frozen face once; later frames only patch the rim dash
+  gfx->flush();
+
+  faceAnimStartMs = millis();
+  faceAnimActive = true;
+  faceAnimPrevValid = false;
+  faceAnimPrevPos = fromPos;
+  setCpuFrequencyMhz(240);  // brief boost for smooth rim slides
+  paintFaceAnimFrame();
+}
+
+void paintFaceAnimFrame() {
+  if (!faceAnimActive || !holdSnapValid || !holdSnap) return;
+  const float pos = faceIndicatorPos();
+
+  int x = 0, y = 0, w = 0, h = 0;
+  faceIndicatorBounds(pos, &x, &y, &w, &h);
+  if (faceAnimPrevValid) {
+    int x0, y0, w0, h0;
+    faceIndicatorBounds(faceAnimPrevPos, &x0, &y0, &w0, &h0);
+    const int x1 = min(x, x0);
+    const int y1 = min(y, y0);
+    const int x2 = max(x + w, x0 + w0);
+    const int y2 = max(y + h, y0 + h0);
+    x = x1;
+    y = y1;
+    w = x2 - x1;
+    h = y2 - y1;
+  }
+
+  // Erase previous dash from snap, paint new dash, flush only that patch
+  blitSnapRect(x, y, w, h);
+  drawFaceIndicator(pos);
+  flushFbRect(x, y, w, h);
+
+  faceAnimPrevPos = pos;
+  faceAnimPrevValid = true;
+}
+
+void finishFaceAnim() {
+  if (!faceAnimActive) return;
+  faceAnimActive = false;
+  faceAnimPrevValid = false;
+  setCpuFrequencyMhz(160);
+  commitFace(faceAnimTarget);
+}
+
+// Immediate jump (serial / tooling). Touch navigation uses animation below.
+void goFace(int i) {
+  if (faceAnimActive) {
+    faceAnimActive = false;
+    faceAnimPrevValid = false;
+    setCpuFrequencyMhz(160);
+  }
+  commitFace(i);
+}
+
+void goFaceAnimated(int i) {
+  if (i < 0 || i >= FACE_COUNT) return;
+  const int cur = (int)badgeFace;
+  if (i == cur) {
+    menuOpen = false;
+    faceDirty = true;
+    return;
+  }
+  const int forward = (i - cur + FACE_COUNT) % FACE_COUNT;
+  const int backward = (cur - i + FACE_COUNT) % FACE_COUNT;
+  const float toPos = (forward <= backward) ? (float)cur + forward
+                                            : (float)cur - backward;
+  startFaceAnim(i, (float)cur, toPos);
+}
+
 void cycleFace(int dir) {
-  goFace(((int)badgeFace + dir + FACE_COUNT) % FACE_COUNT);
+  const int target = ((int)badgeFace + dir + FACE_COUNT) % FACE_COUNT;
+  startFaceAnim(target, (float)badgeFace, (float)badgeFace + (float)dir);
 }
 
 void cycleFaceFromTap() {
@@ -1220,22 +1837,30 @@ void handleSettingsTap() {
 }
 
 void handleTap() {
+  if (faceAnimActive) return;
+
   if (menuOpen) {
     if (tapInCircle(kCx, kCy, 56)) {
       menuOpen = false;
       faceDirty = true;
       return;
     }
-    for (int n = 0; n < FACE_COUNT; n++) {
+    for (int i = 0; i < kMenuN; i++) {
       const float a =
-          (n / (float)FACE_COUNT) * 2.0f * (float)M_PI - (float)M_PI / 2;
+          (i / (float)kMenuN) * 2.0f * (float)M_PI - (float)M_PI / 2;
       const int x = (int)(kCx + cosf(a) * 166.0f);
       const int y = (int)(kCy + sinf(a) * 166.0f);
       if (tapInCircle(x, y, 42)) {
-        goFace(n);
+        goFaceAnimated((int)kMenuFaces[i]);
         return;
       }
     }
+    return;
+  }
+
+  // System Wi‑Fi sub-screens own their gestures (incl. outer taps)
+  if (badgeFace == FACE_SYSTEM) {
+    handleSystemTap();
     return;
   }
 
@@ -1262,13 +1887,14 @@ void handleTap() {
       }
       break;
     case FACE_INBOX:
+      if (notifIdx >= kNotifN) break;  // all clear — no buttons
       if (tapInRect(kCx - 126, kCy + 42, 118, 64)) {
-        if (notifIdx < kNotifN) notifIdx++;
+        notifIdx++;
         flashBtn(0);
         return;
       }
       if (tapInRect(kCx + 8, kCy + 42, 118, 64)) {
-        if (notifIdx < kNotifN) notifIdx++;
+        notifIdx++;
         flashBtn(1);
         return;
       }
@@ -1289,6 +1915,34 @@ void handleTap() {
         return;
       }
       break;
+    case FACE_RECORDER: {
+      // Generous pad around the drawn RECORD / stop control (visual stays small)
+      constexpr int kRecHitX = kCx - 120;
+      constexpr int kRecHitY = kCy + 60;
+      constexpr int kRecHitW = 240;
+      constexpr int kRecHitH = 130;
+      if (!tapInRect(kRecHitX, kRecHitY, kRecHitW, kRecHitH)) break;
+      if (recActive) {
+        BadgeMic::stopRecording();
+        recLastMs = millis() - recStartMs;
+        recActive = false;
+        recCount++;
+        faceDirty = true;
+        return;
+      }
+      if (!BadgeMic::storageAvailable()) {
+        faceDirty = true;
+        return;
+      }
+      if (BadgeMic::startRecording()) {
+        recActive = true;
+        recStartMs = millis();
+        faceDirty = true;
+      } else {
+        faceDirty = true;
+      }
+      return;
+    }
     default:
       break;
   }
@@ -1297,6 +1951,7 @@ void handleTap() {
 }
 
 void handleGesture(GestureEvent ev) {
+  if (faceAnimActive) return;
   if (ev == GESTURE_HOLD_DOOM) {
     enterDoom();
     return;
@@ -1343,6 +1998,8 @@ void captureHoldSnap() {
   if (holdSnap && fb) {
     memcpy(holdSnap, fb, kFbBytes);
     holdSnapValid = true;
+    holdNeedFullFlush = true;
+    holdPrevValid = false;
   }
 }
 
@@ -1367,17 +2024,60 @@ void drawHoldArc(float spanDeg, uint16_t color) {
                -90.0f + spanDeg, color);
 }
 
-void paintHoldFrame() {
-  if (!holdArmed || !holdSnapValid || !holdSnap) return;
-  uint16_t *fb = gfx->getFramebuffer();
-  if (!fb) return;
-  memcpy(fb, holdSnap, kFbBytes);
+// Dirty rect covering a span of the hold ring (spanDeg from top, clockwise)
+void holdArcSectorBounds(float fromSpan, float toSpan, int *ox, int *oy,
+                         int *ow, int *oh) {
+  float a0 = fromSpan;
+  float a1 = toSpan;
+  if (a1 < a0) {
+    const float t = a0;
+    a0 = a1;
+    a1 = t;
+  }
+  a0 -= 10.0f;
+  a1 += 14.0f;
+  if (a0 < 0.0f) a0 = 0.0f;
+  if (a1 > 360.0f) a1 = 360.0f;
+  if (a1 - a0 < 12.0f) {
+    const float mid = 0.5f * (a0 + a1);
+    a0 = mid - 6.0f;
+    a1 = mid + 6.0f;
+  }
 
+  const float rIn = kOuterR - 8.0f;
+  const float rOut = kOuterR + 6.0f;
+  const int samples = max(6, (int)lroundf((a1 - a0) / 5.0f));
+  int minx = LCD_WIDTH, miny = LCD_HEIGHT, maxx = 0, maxy = 0;
+  for (int i = 0; i <= samples; i++) {
+    const float span = a0 + (a1 - a0) * (float)i / (float)samples;
+    const float deg = -90.0f + span;
+    const float rad = deg * (float)M_PI / 180.0f;
+    const float c = cosf(rad), s = sinf(rad);
+    for (int k = 0; k < 2; k++) {
+      const float r = (k == 0) ? rIn : rOut;
+      const int x = kCx + (int)lroundf(c * r);
+      const int y = kCy + (int)lroundf(s * r);
+      if (x < minx) minx = x;
+      if (y < miny) miny = y;
+      if (x > maxx) maxx = x;
+      if (y > maxy) maxy = y;
+    }
+  }
+  minx = max(0, minx - 14);
+  miny = max(0, miny - 14);
+  maxx = min(LCD_WIDTH - 1, maxx + 14);
+  maxy = min(LCD_HEIGHT - 1, maxy + 14);
+  *ox = minx;
+  *oy = miny;
+  *ow = maxx - minx + 1;
+  *oh = maxy - miny + 1;
+}
+
+static void drawHoldRings() {
   const int completed = (int)floorf(holdLaps + 1e-4f);
   float frac = holdLaps - (float)completed;
   if (frac < 0.0f) frac = 0.0f;
 
-  // Completed rings stay on the bezel; each new lap paints over the previous.
   const int fullRings = completed > kHoldDoomLaps ? kHoldDoomLaps : completed;
   for (int i = 0; i < fullRings; i++) {
     drawHoldArc(360.0f, holdRingColor(i));
@@ -1385,7 +2085,59 @@ void paintHoldFrame() {
   if (frac > 0.001f && completed < kHoldDoomLaps) {
     drawHoldArc(frac * 360.0f, holdRingColor(completed));
   }
-  gfx->flush();
+}
+
+void paintHoldFrame() {
+  if (!holdArmed || !holdSnapValid || !holdSnap) return;
+  uint16_t *fb = gfx->getFramebuffer();
+  if (!fb) return;
+
+  if (holdPrevValid && !holdNeedFullFlush &&
+      fabsf(holdLaps - holdPrevLaps) < 0.0004f)
+    return;
+
+  const int completed = (int)floorf(holdLaps + 1e-4f);
+  float frac = holdLaps - (float)completed;
+  if (frac < 0.0f) frac = 0.0f;
+  const float curTip = frac * 360.0f;
+
+  if (holdNeedFullFlush) {
+    memcpy(fb, holdSnap, kFbBytes);
+    drawHoldRings();
+    gfx->flush();
+    holdNeedFullFlush = false;
+    holdPrevLaps = holdLaps;
+    holdPrevValid = true;
+    return;
+  }
+
+  float prevTip = curTip;
+  int prevCompleted = completed;
+  if (holdPrevValid) {
+    prevCompleted = (int)floorf(holdPrevLaps + 1e-4f);
+    float pf = holdPrevLaps - (float)prevCompleted;
+    if (pf < 0.0f) pf = 0.0f;
+    prevTip = pf * 360.0f;
+  }
+
+  int x, y, w, h;
+  if (!holdPrevValid || prevCompleted != completed) {
+    // Lap boundary: refresh from top through the new tip (or whole ring)
+    if (curTip < 2.0f)
+      holdArcSectorBounds(0.0f, 360.0f, &x, &y, &w, &h);
+    else
+      holdArcSectorBounds(0.0f, max(curTip, 18.0f), &x, &y, &w, &h);
+  } else {
+    holdArcSectorBounds(min(prevTip, curTip), max(prevTip, curTip), &x, &y, &w,
+                        &h);
+  }
+
+  blitSnapRect(x, y, w, h);
+  drawHoldRings();
+  flushFbRect(x, y, w, h);
+
+  holdPrevLaps = holdLaps;
+  holdPrevValid = true;
 }
 
 GestureEvent pollGesture() {
@@ -1413,6 +2165,21 @@ GestureEvent pollGesture() {
 
   if (gotPoint && !touchDown) {
     touchDown = true;
+    // Dimmed screen: this contact only restores brightness
+    if (displayIsDimmed()) {
+      wakeDisplay();
+      wakeConsumeTouch = true;
+      holdCandidate = false;
+      holdArmed = false;
+      holdDoomSent = false;
+      holdMenuFired = false;
+      holdLaps = 0.0f;
+      touchStartMs = now;
+      touchStartX = sx;
+      touchStartY = sy;
+      return GESTURE_NONE;
+    }
+    wakeConsumeTouch = false;
     holdCandidate = true;
     holdArmed = false;
     holdDoomSent = false;
@@ -1424,6 +2191,19 @@ GestureEvent pollGesture() {
     lastInteractionMs = now;
   }
 
+  if (touchDown && wakeConsumeTouch) {
+    // Swallow the whole contact — no tap / hold / menu
+    if (!gotPoint && now - touchLastSeenMs > kLiftQuietMs) {
+      touchDown = false;
+      wakeConsumeTouch = false;
+      holdArmed = false;
+      holdSnapValid = false;
+      holdLaps = 0.0f;
+      lastInteractionMs = now;
+    }
+    return GESTURE_NONE;
+  }
+
   if (touchDown) {
     const uint32_t contactMs = touchLastSeenMs - touchStartMs;
     if (gotPoint && !holdArmed &&
@@ -1433,6 +2213,9 @@ GestureEvent pollGesture() {
     if (holdCandidate && contactMs >= kHoldArmMs) {
       if (!holdArmed) {
         holdArmed = true;
+        holdPrevValid = false;
+        holdNeedFullFlush = true;
+        setCpuFrequencyMhz(240);  // match face-slide smoothness
         // Snapshot the current face under the progressing rim arc
         drawChrome();
         drawFaceContent();
@@ -1450,6 +2233,8 @@ GestureEvent pollGesture() {
         holdDoomSent = true;
         holdArmed = false;
         holdSnapValid = false;
+        holdPrevValid = false;
+        setCpuFrequencyMhz(160);
         lastInteractionMs = now;
         return GESTURE_HOLD_DOOM;
       }
@@ -1464,8 +2249,10 @@ GestureEvent pollGesture() {
       holdArmed = false;
       holdDoomSent = false;
       holdSnapValid = false;
+      holdPrevValid = false;
       holdLaps = 0.0f;
       if (wasHold) {
+        setCpuFrequencyMhz(160);
         // Drop the rim overlay — partial first lap must not linger.
         faceDirty = true;
         if (partialOnly) {
@@ -1606,6 +2393,9 @@ void startBleBeacon() {
       (char)(urlHash >> 8), (char)urlHash};
   payload.setManufacturerData(String(manufacturer, sizeof(manufacturer)));
   advertising->setAdvertisementData(payload);
+  // Adv interval units are 0.625 ms → ~1.0–1.2 s (saves TX duty cycle)
+  advertising->setMinInterval(0x0640);
+  advertising->setMaxInterval(0x0780);
   advertising->start();
   Serial.println("BLE intro beacon active");
 #else
@@ -1620,6 +2410,9 @@ void setup() {
   delay(800);
   Serial.println();
   Serial.println("Badge OS boot…");
+
+  // 160 MHz is plenty for UI + I2S; cuts core power vs default 240
+  setCpuFrequencyMhz(160);
 
   powerButtonInit();
   Serial.println("power ok");
@@ -1636,18 +2429,31 @@ void setup() {
     Serial.println("touch init failed!");
   }
 
+  // Probe IMU but leave it powered down — nothing reads it yet
   imuOk = qmi.begin(Wire, QMI8658_L_SLAVE_ADDRESS, IIC_SDA, IIC_SCL);
   if (imuOk) {
-    qmi.configAccelerometer(SensorQMI8658::ACC_RANGE_4G,
-                            SensorQMI8658::ACC_ODR_250Hz,
-                            SensorQMI8658::LPF_MODE_0);
-    qmi.enableAccelerometer();
+    qmi.disableAccelerometer();
+    qmi.disableGyroscope();
   }
 
   Wire.setClock(400000);
   Wire.setTimeOut(20);
 
-  Serial.println("Badge OS version: 2026-09-04-V1");
+  Serial.println("mic init…");
+  BadgeMic::begin();  // codec ready; I2S starts only on Recorder
+
+  loadWifiCreds();
+  kbInit(&wifiKb);
+  WiFi.persistent(false);
+  if (wifiSsid[0]) {
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(true);
+    WiFi.begin(wifiSsid, wifiPass);
+  } else {
+    wifiRadioOff();
+  }
+
+  Serial.println("Badge OS version: 2026-09-05-V3");
   loadBadgeStats();
   Serial.println("prefs ok");
   lastInteractionMs = millis();
@@ -1666,7 +2472,11 @@ void loop() {
   pollSerialCommands();
 
   if (state == UI_DOOM_ANIM) {
-    drawDoomAnim();
+    static uint32_t lastDoom = 0;
+    if (millis() - lastDoom >= 33) {
+      lastDoom = millis();
+      drawDoomAnim();
+    }
     if (!doomBootTried && millis() - animStartMs > 3200) {
       doomBootTried = true;
       Serial.println("...yes it can");
@@ -1679,6 +2489,16 @@ void loop() {
     return;
   }
 
+  const uint32_t idleMs = millis() - lastInteractionMs;
+
+  // Auto-dim AMOLED after idle (first touch while dimmed only wakes)
+  {
+    uint8_t want = kBrightFull;
+    if (idleMs > 45000) want = 40;
+    else if (idleMs > 15000) want = 90;
+    setDisplayBrightness(want);
+  }
+
   const GestureEvent gesture = pollGesture();
   handleGesture(gesture);
 
@@ -1686,18 +2506,101 @@ void loop() {
     btnFlashId = -1;
     faceDirty = true;
   }
-  if (badgeFace == FACE_RADAR && !holdArmed && !menuOpen) {
+
+  // Freeze radar when deeply idle (AMOLED already dim) — no full-screen churn
+  if (badgeFace == FACE_RADAR && !holdArmed && !menuOpen && !faceAnimActive &&
+      idleMs < 20000) {
     static uint32_t lastRadar = 0;
-    if (millis() - lastRadar > 40) {
+    if (millis() - lastRadar > 90) {  // ~11 fps
       lastRadar = millis();
-      radarAngle = fmodf(radarAngle + 4.0f, 360.0f);
+      radarAngle = fmodf(radarAngle + 8.0f, 360.0f);
       faceDirty = true;
     }
   }
 
-  if (holdArmed) {
+  if (badgeFace == FACE_RECORDER && !holdArmed && !menuOpen &&
+      !faceAnimActive) {
+    // Live meters only while interacting; park I2S after short idle
+    if (!BadgeMic::isRecording()) {
+      if (idleMs > 10000) BadgeMic::pauseCapture();
+      else BadgeMic::resumeCapture();
+    }
+    static uint32_t lastRec = 0;
+    const bool liveMeters =
+        BadgeMic::isRecording() || idleMs < 12000;
+    if (liveMeters) {
+      const uint32_t period = BadgeMic::isRecording() ? 100 : 280;
+      if (millis() - lastRec > period) {
+        lastRec = millis();
+        faceDirty = true;
+      }
+    }
+  }
+
+  // Drop failed boot/join Wi‑Fi so STA doesn't keep probing
+  if (wifiSsid[0] && WiFi.getMode() != WIFI_OFF &&
+      WiFi.status() != WL_CONNECTED && sysMode != SYS_BUSY &&
+      sysMode != SYS_PASS && idleMs > 45000 && badgeFace != FACE_SYSTEM) {
+    static uint32_t lastWifiCull = 0;
+    if (millis() - lastWifiCull > 30000) {
+      lastWifiCull = millis();
+      wifiRadioOff();
+      snprintf(wifiStatus, sizeof(wifiStatus), "OFFLINE");
+    }
+  }
+
+  // Wi‑Fi scan / connect state machine
+  if (sysMode == SYS_BUSY) {
+    const int16_t scan = WiFi.scanComplete();
+    if (scan >= 0 && strcmp(wifiStatus, "SCANNING…") == 0) {
+      wifiScanCount = scan;
+      sysMode = SYS_LIST;
+      snprintf(wifiStatus, sizeof(wifiStatus), "%d FOUND", scan);
+      faceDirty = true;
+    } else if (strcmp(wifiStatus, "CONNECTING…") == 0) {
+      const wl_status_t st = WiFi.status();
+      if (st == WL_CONNECTED) {
+        sysMode = SYS_HOME;
+        snprintf(wifiStatus, sizeof(wifiStatus), "CONNECTED");
+        WiFi.setSleep(true);
+        faceDirty = true;
+      } else if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL ||
+                 millis() - wifiBusySince > 20000) {
+        sysMode = SYS_PASS;
+        snprintf(wifiStatus, sizeof(wifiStatus), "FAILED");
+        faceDirty = true;
+      }
+    } else if (millis() - wifiBusySince > 15000 &&
+               strcmp(wifiStatus, "SCANNING…") == 0) {
+      WiFi.scanDelete();
+      wifiScanCount = 0;
+      sysMode = SYS_LIST;
+      snprintf(wifiStatus, sizeof(wifiStatus), "SCAN TIMEOUT");
+      faceDirty = true;
+    }
+  }
+
+  bool painted = false;
+  if (faceAnimActive) {
+    if (millis() - faceAnimStartMs >= kFaceAnimMs) {
+      finishFaceAnim();
+      drawBadge();
+      painted = true;
+    } else {
+      paintFaceAnimFrame();
+      painted = true;
+    }
+  } else if (holdArmed) {
     paintHoldFrame();
+    painted = true;
   } else if (faceDirty) {
     drawBadge();
+    painted = true;
+  }
+
+  // Idle: yield so FreeRTOS / modem sleep can run
+  if (!painted && !holdArmed && !faceAnimActive && !touchDown &&
+      sysMode != SYS_BUSY) {
+    delay(idleMs > 15000 ? 20 : 8);
   }
 }
