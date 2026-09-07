@@ -151,11 +151,4 @@ static const char *const kFaceBot[FACE_COUNT] = {
     "TAP TO START / STOP", "STORED ON DEVICE",
 };
 
-// Hold-menu shortcuts (not every dial face)
-static const BadgeFace kMenuFaces[] = {
-    FACE_IDENTITY, FACE_CONNECT, FACE_RECORDER, FACE_SETTINGS, FACE_SYSTEM,
-};
-static const char *const kMenuLabels[] = {
-    "BADGE", "QR", "REC", "SET", "SYSTEM",
-};
-static const int kMenuN = (int)(sizeof(kMenuFaces) / sizeof(kMenuFaces[0]));
+// Hold-drag opens any dial face; pies are drawn for all FACE_COUNT panels.

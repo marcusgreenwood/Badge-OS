@@ -72,7 +72,6 @@ constexpr int16_t kActionR = 148;
 constexpr size_t kFbBytes = (size_t)LCD_WIDTH * LCD_HEIGHT * sizeof(uint16_t);
 
 BadgeFace badgeFace = FACE_IDENTITY;
-bool menuOpen = false;
 bool faceDirty = true;
 bool imuOk = false;
 uint32_t towerBest = 0;
@@ -147,8 +146,8 @@ Theme theme;
 enum GestureEvent {
   GESTURE_NONE,
   GESTURE_TAP,
-  GESTURE_HOLD_MENU,  // first rim lap complete → open menu
-  GESTURE_HOLD_DOOM   // fifth rim lap complete → doom
+  GESTURE_HOLD_FACE,  // released on a pie slice → that face
+  GESTURE_HOLD_DOOM   // rim charged in centre, released in centre
 };
 
 void setDisplayBrightness(uint8_t level) {
@@ -167,7 +166,6 @@ void wakeDisplay() {
 bool touchDown = false;
 bool holdCandidate = false;
 bool holdArmed = false;
-bool holdDoomSent = false;
 uint32_t touchStartMs = 0;
 uint32_t touchLastSeenMs = 0;
 int16_t touchStartX = 0, touchStartY = 0;
@@ -175,19 +173,23 @@ int16_t tapX = 0, tapY = 0;
 volatile bool touchPending = false;
 uint32_t lastTouchReportMs = 0;
 
-constexpr uint32_t kHoldArmMs = 200;    // debounce before rim arc starts
-constexpr uint32_t kHoldLapMs = 1000;   // one full circle around the bezel
-constexpr uint32_t kHoldPauseMs = 500;  // dwell on completed ring before next lap
+constexpr uint32_t kHoldArmMs = 200;      // debounce before pies appear
+constexpr uint32_t kHoldPieMs = 420;      // pie expand animation
+constexpr uint32_t kHoldDoomArmMs = 2000; // centre dwell before rim rings
+constexpr uint32_t kHoldDoomLapMs = 1000; // one full rim circle per second
+constexpr int kHoldDoomLaps = 5;          // circles needed → Doom on release
 constexpr uint32_t kLiftQuietMs = 120;
-constexpr int kHoldDoomLaps = 5;
+constexpr float kHoldCenterR = 72.0f;     // centre zone (Doom charge)
+constexpr float kHoldPieMinR = 100.0f;    // must drag out this far for a pie
 
 uint16_t *holdSnap = nullptr;
 bool holdSnapValid = false;
-float holdLaps = 0.0f;
-float holdPrevLaps = 0.0f;
-bool holdPrevValid = false;
-bool holdNeedFullFlush = false;
-bool holdMenuFired = false;
+int8_t holdHoverFace = -1;    // -1 = centre / none
+int8_t holdSelectFace = -1;   // set on GESTURE_HOLD_FACE
+uint32_t holdArmStartMs = 0;
+uint32_t holdCenterSinceMs = 0;  // when finger entered centre (0 = not in centre)
+float holdDoomLaps = 0.0f;       // rim progress; resets when leaving for a pie
+
 
 // Doom fire
 constexpr int kFW = 58, kFH = 40;
@@ -553,11 +555,11 @@ void enterDoom() {
   touchDown = false;
   holdArmed = false;
   holdSnapValid = false;
-  holdPrevValid = false;
-  holdMenuFired = false;
-  holdLaps = 0.0f;
+  holdHoverFace = -1;
+  holdSelectFace = -1;
+  holdCenterSinceMs = 0;
+  holdDoomLaps = 0.0f;
   setCpuFrequencyMhz(160);
-  menuOpen = false;
   fireInit();
   animStartMs = millis();
   doomBootTried = false;
@@ -1137,32 +1139,6 @@ void drawChrome() {
   drawRimLabels();
 }
 
-void drawMenuRing() {
-  // Fully opaque overlay — hide the page underneath
-  gfx->fillCircle(kCx, kCy, 233, theme.bg);
-  gfx->drawCircle(kCx, kCy, 166, theme.line2);
-  for (int i = 0; i < kMenuN; i++) {
-    const float a =
-        (i / (float)kMenuN) * 2.0f * (float)M_PI - (float)M_PI / 2;
-    const int x = (int)(kCx + cosf(a) * 166.0f);
-    const int y = (int)(kCy + sinf(a) * 166.0f);
-    const BadgeFace face = kMenuFaces[i];
-    const bool on = face == badgeFace;
-    const uint16_t onCol =
-        isRainbowPalette() ? faceAccentColor((int)face) : theme.accent;
-    gfx->drawCircle(x, y, 42, on ? onCol : theme.line);
-    const char *lab = kMenuLabels[i];
-    // Slightly smaller type for longer labels (e.g. SYSTEM)
-    const float sc = (strlen(lab) >= 6) ? 0.58f : 0.7f;
-    const float tw = fontTextWidth(lab, sc);
-    drawFontTextAt(lab, x - tw * 0.5f, y + 5.0f, sc, on ? onCol : theme.fg);
-  }
-  // Close control — filled so it reads as a distinct button, not empty hole
-  gfx->fillCircle(kCx, kCy, 56, theme.line);
-  gfx->drawCircle(kCx, kCy, 56, theme.faint);
-  drawFontTextCX("CLOSE", kCy + 6.0f, 0.85f, theme.fg);
-}
-
 void drawConnect() {
   // Sized for camera scan without crowding rim labels.
   // Finder corners stay inside the disc; quiet zone from disc ground.
@@ -1718,7 +1694,6 @@ void drawFaceContent() {
 void drawBadge() {
   drawChrome();
   drawFaceContent();
-  if (menuOpen) drawMenuRing();
   gfx->flush();
   faceDirty = false;
 }
@@ -1741,7 +1716,6 @@ void commitFace(int i) {
   if (i < 0 || i >= FACE_COUNT) return;
   const BadgeFace prev = badgeFace;
   badgeFace = (BadgeFace)i;
-  menuOpen = false;
   if (isRainbowPalette()) applyFaceAccent((int)badgeFace);
   if (badgeFace != FACE_SYSTEM) {
     if (sysMode == SYS_LIST || sysMode == SYS_BUSY) WiFi.scanDelete();
@@ -1763,14 +1737,12 @@ void startFaceAnim(int target, float fromPos, float toPos) {
   if (faceAnimActive) return;
   if (target < 0 || target >= FACE_COUNT) return;
   if (target == (int)badgeFace) {
-    menuOpen = false;
     faceDirty = true;
     return;
   }
   faceAnimFrom = fromPos;
   faceAnimTo = toPos;
   faceAnimTarget = target;
-  menuOpen = false;
 
   // Freeze the current face (no indicator) into a snapshot so each anim frame
   // only restores pixels + paints the sliding dash — full redraws are too slow.
@@ -1842,7 +1814,6 @@ void goFaceAnimated(int i) {
   if (i < 0 || i >= FACE_COUNT) return;
   const int cur = (int)badgeFace;
   if (i == cur) {
-    menuOpen = false;
     faceDirty = true;
     return;
   }
@@ -1898,25 +1869,6 @@ void handleSettingsTap() {
 
 void handleTap() {
   if (faceAnimActive) return;
-
-  if (menuOpen) {
-    if (tapInCircle(kCx, kCy, 56)) {
-      menuOpen = false;
-      faceDirty = true;
-      return;
-    }
-    for (int i = 0; i < kMenuN; i++) {
-      const float a =
-          (i / (float)kMenuN) * 2.0f * (float)M_PI - (float)M_PI / 2;
-      const int x = (int)(kCx + cosf(a) * 166.0f);
-      const int y = (int)(kCy + sinf(a) * 166.0f);
-      if (tapInCircle(x, y, 42)) {
-        goFaceAnimated((int)kMenuFaces[i]);
-        return;
-      }
-    }
-    return;
-  }
 
   // System Wi‑Fi sub-screens own their gestures (incl. outer taps)
   if (badgeFace == FACE_SYSTEM) {
@@ -2016,14 +1968,10 @@ void handleGesture(GestureEvent ev) {
     enterDoom();
     return;
   }
-  if (ev == GESTURE_HOLD_MENU) {
-    menuOpen = true;
-    // Bake the menu into the hold snapshot so the rim arc continues on top
-    drawChrome();
-    drawFaceContent();
-    drawMenuRing();
-    captureHoldSnap();
-    faceDirty = false;
+  if (ev == GESTURE_HOLD_FACE) {
+    if (holdSelectFace >= 0 && holdSelectFace < FACE_COUNT)
+      goFaceAnimated((int)holdSelectFace);
+    holdSelectFace = -1;
     return;
   }
   if (ev == GESTURE_TAP) handleTap();
@@ -2041,33 +1989,66 @@ bool takeTouchInterrupt() {
   return pending;
 }
 
-float holdProgressForMs(uint32_t elapsedMs) {
-  constexpr uint32_t cycleMs = kHoldLapMs + kHoldPauseMs;
-  if (cycleMs == 0) return 0.0f;
-  const uint32_t completed = elapsedMs / cycleMs;
-  if (completed >= (uint32_t)kHoldDoomLaps) return (float)kHoldDoomLaps;
-  const uint32_t within = elapsedMs % cycleMs;
-  // Full ring holds during the pause; next lap starts after kHoldPauseMs.
-  if (within >= kHoldLapMs) return (float)(completed + 1);
-  return (float)completed + (float)within / (float)kHoldLapMs;
-}
-
 void captureHoldSnap() {
   uint16_t *fb = gfx->getFramebuffer();
   if (!holdSnap) holdSnap = allocFb("holdSnap");
   if (holdSnap && fb) {
     memcpy(holdSnap, fb, kFbBytes);
     holdSnapValid = true;
-    holdNeedFullFlush = true;
-    holdPrevValid = false;
   }
 }
 
-// Lap 0 = accent, lap 4 (5th) = #FF0000. Intermediate laps lerp toward red.
-uint16_t holdRingColor(int lapIndex) {
-  const int i = lapIndex < 0 ? 0 : (lapIndex > kHoldDoomLaps - 1 ? kHoldDoomLaps - 1
-                                                                  : lapIndex);
-  const float t = (float)i / (float)(kHoldDoomLaps - 1);
+static float holdTouchDist(int16_t x, int16_t y) {
+  const float dx = (float)(x - kCx);
+  const float dy = (float)(y - kCy);
+  return sqrtf(dx * dx + dy * dy);
+}
+
+// Same degree space as rim indicator: -90° at top, increasing clockwise.
+static int faceFromPoint(int16_t x, int16_t y) {
+  const float deg =
+      atan2f((float)(y - kCy), (float)(x - kCx)) * 180.0f / (float)M_PI;
+  float fromTop = deg + 90.0f;
+  while (fromTop < 0.0f) fromTop += 360.0f;
+  while (fromTop >= 360.0f) fromTop -= 360.0f;
+  int face = (int)(fromTop / (360.0f / (float)FACE_COUNT));
+  if (face < 0) face = 0;
+  if (face >= FACE_COUNT) face = FACE_COUNT - 1;
+  return face;
+}
+
+static void resetHoldDoomCharge() {
+  holdDoomLaps = 0.0f;
+  holdCenterSinceMs = 0;
+}
+
+static void updateHoldHover(int16_t x, int16_t y, uint32_t now) {
+  const float dist = holdTouchDist(x, y);
+  if (dist < kHoldCenterR) {
+    holdHoverFace = -1;
+    if (holdCenterSinceMs == 0) holdCenterSinceMs = now;
+    // Rim rings only after a continuous 2s dwell in the centre
+    if (now - holdCenterSinceMs >= kHoldDoomArmMs) {
+      const uint32_t charged =
+          now - holdCenterSinceMs - kHoldDoomArmMs;
+      holdDoomLaps = (float)charged / (float)kHoldDoomLapMs;
+      if (holdDoomLaps > (float)kHoldDoomLaps)
+        holdDoomLaps = (float)kHoldDoomLaps;
+    } else {
+      holdDoomLaps = 0.0f;
+    }
+    return;
+  }
+  // Left the centre — clear Doom charge (pies or dead zone)
+  if (dist >= kHoldPieMinR)
+    holdHoverFace = (int8_t)faceFromPoint(x, y);
+  else
+    holdHoverFace = -1;
+  resetHoldDoomCharge();
+}
+
+static uint16_t holdDoomColor(float t) {
+  t = clampf(t, 0.0f, 1.0f);
   uint8_t ar = ((theme.accent >> 11) & 0x1F) * 255 / 31;
   uint8_t ag = ((theme.accent >> 5) & 0x3F) * 255 / 63;
   uint8_t ab = (theme.accent & 0x1F) * 255 / 31;
@@ -2077,127 +2058,107 @@ uint16_t holdRingColor(int lapIndex) {
   return rgb(r, g, b);
 }
 
-void drawHoldArc(float spanDeg, uint16_t color) {
+static void drawHoldArc(float spanDeg, uint16_t color) {
   if (spanDeg <= 0.05f) return;
   if (spanDeg > 360.0f) spanDeg = 360.0f;
   gfx->fillArc(kCx, kCy, (int)kOuterR + 4, (int)kOuterR - 6, -90.0f,
                -90.0f + spanDeg, color);
 }
 
-// Dirty rect covering a span of the hold ring (spanDeg from top, clockwise)
-void holdArcSectorBounds(float fromSpan, float toSpan, int *ox, int *oy,
-                         int *ow, int *oh) {
-  float a0 = fromSpan;
-  float a1 = toSpan;
-  if (a1 < a0) {
-    const float t = a0;
-    a0 = a1;
-    a1 = t;
-  }
-  a0 -= 10.0f;
-  a1 += 14.0f;
-  if (a0 < 0.0f) a0 = 0.0f;
-  if (a1 > 360.0f) a1 = 360.0f;
-  if (a1 - a0 < 12.0f) {
-    const float mid = 0.5f * (a0 + a1);
-    a0 = mid - 6.0f;
-    a1 = mid + 6.0f;
-  }
-
-  const float rIn = kOuterR - 8.0f;
-  const float rOut = kOuterR + 6.0f;
-  const int samples = max(6, (int)lroundf((a1 - a0) / 5.0f));
-  int minx = LCD_WIDTH, miny = LCD_HEIGHT, maxx = 0, maxy = 0;
-  for (int i = 0; i <= samples; i++) {
-    const float span = a0 + (a1 - a0) * (float)i / (float)samples;
-    const float deg = -90.0f + span;
-    const float rad = deg * (float)M_PI / 180.0f;
-    const float c = cosf(rad), s = sinf(rad);
-    for (int k = 0; k < 2; k++) {
-      const float r = (k == 0) ? rIn : rOut;
-      const int x = kCx + (int)lroundf(c * r);
-      const int y = kCy + (int)lroundf(s * r);
-      if (x < minx) minx = x;
-      if (y < miny) miny = y;
-      if (x > maxx) maxx = x;
-      if (y > maxy) maxy = y;
-    }
-  }
-  minx = max(0, minx - 14);
-  miny = max(0, miny - 14);
-  maxx = min(LCD_WIDTH - 1, maxx + 14);
-  maxy = min(LCD_HEIGHT - 1, maxy + 14);
-  *ox = minx;
-  *oy = miny;
-  *ow = maxx - minx + 1;
-  *oh = maxy - miny + 1;
-}
-
-static void drawHoldRings() {
-  const int completed = (int)floorf(holdLaps + 1e-4f);
-  float frac = holdLaps - (float)completed;
+static void drawHoldDoomRings() {
+  if (holdDoomLaps <= 0.001f) return;
+  const int completed = (int)floorf(holdDoomLaps + 1e-4f);
+  float frac = holdDoomLaps - (float)completed;
   if (frac < 0.0f) frac = 0.0f;
-
-  const int fullRings = completed > kHoldDoomLaps ? kHoldDoomLaps : completed;
-  for (int i = 0; i < fullRings; i++) {
-    drawHoldArc(360.0f, holdRingColor(i));
+  const int full =
+      completed > kHoldDoomLaps ? kHoldDoomLaps : completed;
+  for (int i = 0; i < full; i++) {
+    const float t =
+        (float)i / (float)max(1, kHoldDoomLaps - 1);
+    drawHoldArc(360.0f, holdDoomColor(t));
   }
   if (frac > 0.001f && completed < kHoldDoomLaps) {
-    drawHoldArc(frac * 360.0f, holdRingColor(completed));
+    const float t =
+        (float)completed / (float)max(1, kHoldDoomLaps - 1);
+    drawHoldArc(frac * 360.0f, holdDoomColor(t));
   }
+}
+
+static void drawHoldPies(float grow, int hover) {
+  grow = clampf(grow, 0.0f, 1.0f);
+  if (grow < 0.02f) return;
+  const float seg = 360.0f / (float)FACE_COUNT;
+  const float gap = 2.4f;
+  const float rOut = kOuterR - 10.0f;
+  // Stop ~15px further from centre than before (larger empty middle)
+  const float rIn = kOuterR - 18.0f - grow * 80.0f;
+  for (int i = 0; i < FACE_COUNT; i++) {
+    const float start = -90.0f + (float)i * seg + gap * 0.5f;
+    const float span = seg - gap;
+    const float mid = start + span * 0.5f;
+    const float half = (span * 0.5f) * grow;
+    const bool on = (i == hover);
+    uint16_t col;
+    if (on) {
+      // Darker fill of the highlight colour — bright rim dash drawn after
+      if (isRainbowPalette()) {
+        col = faceAccentColor(i, 115);
+      } else {
+        uint8_t ar = ((theme.accent >> 11) & 0x1F) * 255 / 31;
+        uint8_t ag = ((theme.accent >> 5) & 0x3F) * 255 / 63;
+        uint8_t ab = (theme.accent & 0x1F) * 255 / 31;
+        col = rgb((ar * 115) / 255, (ag * 115) / 255, (ab * 115) / 255);
+      }
+    } else if (isRainbowPalette()) {
+      col = faceAccentColor(i, 70);
+    } else {
+      col = theme.line;
+    }
+    gfx->fillArc(kCx, kCy, (int)rOut, (int)max(36.0f, rIn), mid - half,
+                 mid + half, col);
+  }
+  // Outer dial curve for the hovered panel — full highlight colour
+  if (hover >= 0 && hover < FACE_COUNT && grow > 0.55f)
+    drawFaceIndicator((float)hover);
+}
+
+static void drawHoldCenterTitle(float grow, int hover) {
+  // Soft centre plate — title only lives here (never on the pies)
+  const int discR = (int)(40.0f + grow * 22.0f);
+  gfx->fillCircle(kCx, kCy, discR + 10, theme.scrim);
+  gfx->fillCircle(kCx, kCy, discR, theme.bg);
+  gfx->drawCircle(kCx, kCy, discR, theme.line2);
+
+  const char *title = nullptr;
+  uint16_t titleCol = theme.fg;
+  if (hover >= 0 && hover < FACE_COUNT) {
+    title = kFaceCode[hover];
+    titleCol = isRainbowPalette() ? faceAccentColor(hover) : theme.accent;
+  } else if (holdDoomLaps >= (float)kHoldDoomLaps - 0.001f) {
+    title = "DOOM";
+    titleCol = rgb(0xFF, 0x20, 0x20);
+  }
+  if (title)
+    drawFontTextCX(title, kCy + 8.0f, hover >= 0 ? 1.35f : 1.45f, titleCol);
 }
 
 void paintHoldFrame() {
   if (!holdArmed || !holdSnapValid || !holdSnap) return;
+  static uint32_t lastPaint = 0;
+  const uint32_t now = millis();
+  if (now - lastPaint < 32) return;  // ~30 fps
+  lastPaint = now;
+
   uint16_t *fb = gfx->getFramebuffer();
   if (!fb) return;
+  memcpy(fb, holdSnap, kFbBytes);
 
-  if (holdPrevValid && !holdNeedFullFlush &&
-      fabsf(holdLaps - holdPrevLaps) < 0.0004f)
-    return;
-
-  const int completed = (int)floorf(holdLaps + 1e-4f);
-  float frac = holdLaps - (float)completed;
-  if (frac < 0.0f) frac = 0.0f;
-  const float curTip = frac * 360.0f;
-
-  if (holdNeedFullFlush) {
-    memcpy(fb, holdSnap, kFbBytes);
-    drawHoldRings();
-    gfx->flush();
-    holdNeedFullFlush = false;
-    holdPrevLaps = holdLaps;
-    holdPrevValid = true;
-    return;
-  }
-
-  float prevTip = curTip;
-  int prevCompleted = completed;
-  if (holdPrevValid) {
-    prevCompleted = (int)floorf(holdPrevLaps + 1e-4f);
-    float pf = holdPrevLaps - (float)prevCompleted;
-    if (pf < 0.0f) pf = 0.0f;
-    prevTip = pf * 360.0f;
-  }
-
-  int x, y, w, h;
-  if (!holdPrevValid || prevCompleted != completed) {
-    // Lap boundary: refresh from top through the new tip (or whole ring)
-    if (curTip < 2.0f)
-      holdArcSectorBounds(0.0f, 360.0f, &x, &y, &w, &h);
-    else
-      holdArcSectorBounds(0.0f, max(curTip, 18.0f), &x, &y, &w, &h);
-  } else {
-    holdArcSectorBounds(min(prevTip, curTip), max(prevTip, curTip), &x, &y, &w,
-                        &h);
-  }
-
-  blitSnapRect(x, y, w, h);
-  drawHoldRings();
-  flushFbRect(x, y, w, h);
-
-  holdPrevLaps = holdLaps;
-  holdPrevValid = true;
+  const float grow =
+      easeInOut((float)(now - holdArmStartMs) / (float)kHoldPieMs);
+  drawHoldPies(grow, holdHoverFace);
+  drawHoldDoomRings();
+  drawHoldCenterTitle(grow, holdHoverFace);
+  gfx->flush();
 }
 
 GestureEvent pollGesture() {
@@ -2208,7 +2169,7 @@ GestureEvent pollGesture() {
   if (takeTouchInterrupt()) pollUntil = now + 180;
   bool gotPoint = false;
   int16_t sx = 0, sy = 0;
-  if ((menuOpen || touchDown || now <= pollUntil) && now - lastReadMs >= 8) {
+  if ((touchDown || now <= pollUntil) && now - lastReadMs >= 8) {
     lastReadMs = now;
     int16_t x, y;
     if (touch.getPoint(&x, &y, 1) > 0) {
@@ -2231,9 +2192,8 @@ GestureEvent pollGesture() {
       wakeConsumeTouch = true;
       holdCandidate = false;
       holdArmed = false;
-      holdDoomSent = false;
-      holdMenuFired = false;
-      holdLaps = 0.0f;
+      holdHoverFace = -1;
+      resetHoldDoomCharge();
       touchStartMs = now;
       touchStartX = sx;
       touchStartY = sy;
@@ -2242,9 +2202,9 @@ GestureEvent pollGesture() {
     wakeConsumeTouch = false;
     holdCandidate = true;
     holdArmed = false;
-    holdDoomSent = false;
-    holdMenuFired = false;
-    holdLaps = 0.0f;
+    holdHoverFace = -1;
+    holdSelectFace = -1;
+    resetHoldDoomCharge();
     touchStartMs = now;
     touchStartX = sx;
     touchStartY = sy;
@@ -2252,13 +2212,13 @@ GestureEvent pollGesture() {
   }
 
   if (touchDown && wakeConsumeTouch) {
-    // Swallow the whole contact — no tap / hold / menu
+    // Swallow the whole contact — no tap / hold
     if (!gotPoint && now - touchLastSeenMs > kLiftQuietMs) {
       touchDown = false;
       wakeConsumeTouch = false;
       holdArmed = false;
       holdSnapValid = false;
-      holdLaps = 0.0f;
+      resetHoldDoomCharge();
       lastInteractionMs = now;
     }
     return GESTURE_NONE;
@@ -2273,30 +2233,20 @@ GestureEvent pollGesture() {
     if (holdCandidate && contactMs >= kHoldArmMs) {
       if (!holdArmed) {
         holdArmed = true;
-        holdPrevValid = false;
-        holdNeedFullFlush = true;
-        setCpuFrequencyMhz(240);  // match face-slide smoothness
-        // Snapshot the current face under the progressing rim arc
-        drawChrome();
-        drawFaceContent();
-        if (menuOpen) drawMenuRing();
+        holdArmStartMs = now;
+        holdHoverFace = -1;
+        resetHoldDoomCharge();
+        setCpuFrequencyMhz(240);
+        // Solid ground only — never show the face under the pies
+        gfx->fillScreen(theme.bg);
         captureHoldSnap();
         lastInteractionMs = now;
       }
-      holdLaps = holdProgressForMs(now - touchStartMs - kHoldArmMs);
-      if (!holdMenuFired && holdLaps >= 1.0f) {
-        holdMenuFired = true;
-        lastInteractionMs = now;
-        return GESTURE_HOLD_MENU;
-      }
-      if (!holdDoomSent && holdLaps >= (float)kHoldDoomLaps) {
-        holdDoomSent = true;
-        holdArmed = false;
-        holdSnapValid = false;
-        holdPrevValid = false;
-        setCpuFrequencyMhz(160);
-        lastInteractionMs = now;
-        return GESTURE_HOLD_DOOM;
+      if (gotPoint) updateHoldHover(sx, sy, now);
+      else if (holdArmed && holdCenterSinceMs != 0 &&
+               holdTouchDist(tapX, tapY) < kHoldCenterR) {
+        // Keep charging while finger is still down but sample skipped a frame
+        updateHoldHover(tapX, tapY, now);
       }
     }
 
@@ -2304,21 +2254,31 @@ GestureEvent pollGesture() {
       touchDown = false;
       lastInteractionMs = now;
       const bool wasHold = holdArmed;
-      const bool openedMenu = holdMenuFired;
-      const bool partialOnly = wasHold && !openedMenu;
+      const float dist = holdTouchDist(tapX, tapY);
+      const int8_t hover = holdHoverFace;
+      const float doomLaps = holdDoomLaps;
+
       holdArmed = false;
-      holdDoomSent = false;
       holdSnapValid = false;
-      holdPrevValid = false;
-      holdLaps = 0.0f;
+      holdHoverFace = -1;
+      resetHoldDoomCharge();
+
       if (wasHold) {
         setCpuFrequencyMhz(160);
-        // Drop the rim overlay — partial first lap must not linger.
-        faceDirty = true;
-        if (partialOnly) {
-          // Restore the face under the aborted arc (menu never opened).
-          drawBadge();
+        // Centre release after full rim charge → Doom
+        if (dist < kHoldCenterR && doomLaps >= (float)kHoldDoomLaps - 0.001f) {
+          faceDirty = true;
+          return GESTURE_HOLD_DOOM;
         }
+        // Dragged onto a pie → open that face
+        if (hover >= 0 && dist >= kHoldPieMinR) {
+          holdSelectFace = hover;
+          faceDirty = true;
+          return GESTURE_HOLD_FACE;
+        }
+        // Cancelled hold — restore face under the pies
+        faceDirty = true;
+        drawBadge();
         return GESTURE_NONE;
       }
       if (contactMs >= kHoldArmMs) return GESTURE_NONE;
@@ -2395,10 +2355,7 @@ void pollSerialCommands() {
             Serial.println("FACEERR");
           }
         } else if (strncmp(upper, "MENU ", 5) == 0) {
-          menuOpen = (upper[5] == '1');
-          faceDirty = true;
-          drawBadge();
-          Serial.printf("MENUOK %d\n", menuOpen ? 1 : 0);
+          Serial.println("MENUERR hold-drag corners replace menu");
         } else if (strcmp(upper, "TOWERBEST") == 0) {
           refreshTowerBest();
           Serial.printf("TOWERBEST %lu\n", (unsigned long)towerBest);
@@ -2524,7 +2481,7 @@ void setup() {
   drawBadge();
   Serial.printf("Badge OS ready: %s / %s @ %s\n", BADGE_NAME, BADGE_TITLE,
                 BADGE_COMPANY);
-  Serial.println("Commands: SNAP | FACE n|CODE | MENU 0|1");
+  Serial.println("Commands: SNAP | FACE n | CODE");
 }
 
 void loop() {
@@ -2567,8 +2524,26 @@ void loop() {
     faceDirty = true;
   }
 
+  // Battery % on System home — re-read PMU once a minute while that face is up
+  {
+    static uint32_t lastBattery = 0;
+    static bool batteryFaceWasOn = false;
+    const bool batteryFaceOn =
+        badgeFace == FACE_SYSTEM && sysMode == SYS_HOME && !holdArmed &&
+        !faceAnimActive;
+    if (batteryFaceOn) {
+      if (!batteryFaceWasOn) {
+        lastBattery = millis();  // entry already drew a fresh reading
+      } else if (millis() - lastBattery >= 60000) {
+        lastBattery = millis();
+        faceDirty = true;
+      }
+    }
+    batteryFaceWasOn = batteryFaceOn;
+  }
+
   // Freeze radar when deeply idle (AMOLED already dim) — no full-screen churn
-  if (badgeFace == FACE_RADAR && !holdArmed && !menuOpen && !faceAnimActive &&
+  if (badgeFace == FACE_RADAR && !holdArmed && !faceAnimActive &&
       idleMs < 20000) {
     static uint32_t lastRadar = 0;
     if (millis() - lastRadar > 90) {  // ~11 fps
@@ -2578,8 +2553,7 @@ void loop() {
     }
   }
 
-  if (badgeFace == FACE_RECORDER && !holdArmed && !menuOpen &&
-      !faceAnimActive) {
+  if (badgeFace == FACE_RECORDER && !holdArmed && !faceAnimActive) {
     // Live meters only while interacting; park I2S after short idle
     if (!BadgeMic::isRecording()) {
       if (idleMs > 10000) BadgeMic::pauseCapture();

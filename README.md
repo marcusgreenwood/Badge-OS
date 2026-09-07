@@ -83,7 +83,6 @@ Useful debug commands over USB serial:
 
 - `SNAP` — dump framebuffer
 - `FACE n` — switch face
-- `MENU 0|1` — close / open menu
 - `CODE` — promo / unlock helpers
 
 ## Extending
@@ -124,7 +123,7 @@ When prompting, remind the agent of the platform limits so changes stay flashabl
 - **ConferenceBadge** and **HotelTower** are Arduino sketches; **DoomPod** is ESP-IDF.
 - Multi-app boots use the unified partition table; apps return via the shared launcher/power helpers (`launcher_exit.h`, `power_button.h`).
 - Prefer editing config headers over hard-coding one-off strings in draw code when possible.
-- After firmware changes, flash with `./tools/flash_badge_os.sh` (OS only) or `./tools/flash_unified.sh` (all slots). Use `SNAP` / `FACE` / `MENU` over serial to verify.
+- After firmware changes, flash with `./tools/flash_badge_os.sh` (OS only) or `./tools/flash_unified.sh` (all slots). Use `SNAP` / `FACE` over serial to verify.
 
 ### Suggested agent workflow
 
