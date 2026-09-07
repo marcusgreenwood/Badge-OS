@@ -44,6 +44,15 @@ static inline bool powerIsCharging() {
   return __pmuOk && __pmu.isCharging();
 }
 
+static inline bool powerOnVbus() {
+  return __pmuOk && __pmu.isVbusIn();
+}
+
+static inline uint16_t powerBattVoltageMv() {
+  if (!__pmuOk || !__pmu.isBatteryConnect()) return 0;
+  return __pmu.getBattVoltage();
+}
+
 static inline void powerButtonTick() {
   if (!__pmuOk) return;
   static uint32_t lastPoll = 0;

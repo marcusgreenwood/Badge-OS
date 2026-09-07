@@ -34,6 +34,11 @@
 #define BADGE_WIFI_LABEL "CONF-5G"
 #endif
 
+// Pack capacity for remaining-time estimate (mAh). Typical Waveshare kit cell.
+#ifndef BADGE_BATTERY_MAH
+#define BADGE_BATTERY_MAH 1000
+#endif
+
 #ifndef BADGE_BOOK_URL
 #define BADGE_BOOK_URL "https://cal.com/marcusgreenwood/15min"
 #endif
@@ -146,7 +151,7 @@ static const char *const kFaceTop[FACE_COUNT] = {
 
 static const char *const kFaceBot[FACE_COUNT] = {
     "SPEAKER - STAGE 2", BADGE_CONNECT_BOT, "STAGE 2 - YOU SPEAK",
-    "SET BY MARCUS - 09:12", "BLE - DELIVERED 09:41", "14H REMAINING",
+    "SET BY MARCUS - 09:12", "BLE - DELIVERED 09:41", "BATTERY",
     "TAP TO SHUFFLE", "CONFERENCE LEADERBOARD", "BLE PROXIMITY - LIVE",
     "TAP TO START / STOP", "STORED ON DEVICE",
 };

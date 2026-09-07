@@ -83,8 +83,9 @@ uint32_t lastInteractionMs = 0;
 uint32_t animStartMs = 0;
 bool doomBootTried = false;
 
-// AMOLED brightness — first touch while dimmed only wakes the screen
-constexpr uint8_t kBrightFull = 220;
+// AMOLED brightness — first touch while deeply dimmed only wakes the screen
+constexpr uint8_t kBrightFull = 200;
+constexpr uint8_t kBrightWakeGate = 40;  // at/below → wake-only first touch
 uint8_t displayBright = kBrightFull;
 bool wakeConsumeTouch = false;
 
@@ -156,7 +157,7 @@ void setDisplayBrightness(uint8_t level) {
   panel->setBrightness(displayBright);
 }
 
-bool displayIsDimmed() { return displayBright < kBrightFull; }
+bool displayIsDimmed() { return displayBright <= kBrightWakeGate; }
 
 void wakeDisplay() {
   setDisplayBrightness(kBrightFull);
@@ -1129,7 +1130,13 @@ void drawRimLabels() {
   // Top: caps grow outward from baseline. Bottom: caps grow inward, so use a
   // larger radius or the label sits too far from the dial edge.
   drawArcText(kFaceTop[badgeFace], 186.0f, -90.0f, false, theme.dim, 1.0f);
-  drawArcText(kFaceBot[badgeFace], 208.0f, 90.0f, true, theme.accent, 1.0f);
+  char botBuf[28];
+  const char *bot = kFaceBot[badgeFace];
+  if (badgeFace == FACE_SYSTEM) {
+    formatBatteryRemaining(botBuf, sizeof(botBuf));
+    bot = botBuf;
+  }
+  drawArcText(bot, 208.0f, 90.0f, true, theme.accent, 1.0f);
 }
 
 void drawChrome() {
@@ -1289,17 +1296,26 @@ void drawInbox() {
 
 void drawSystemHome() {
   int pct = powerBatteryPercent();
-  if (pct < 0) pct = 78;
+  const bool charging = powerIsCharging();
   const int R = kContentR;
   gfx->fillArc(kCx, kCy, R + 4, R - 6, 115.0f, 115.0f + 240.0f, theme.line2);
-  const float span = 240.0f * (pct / 100.0f);
-  gfx->fillArc(kCx, kCy, R + 4, R - 6, 115.0f, 115.0f + span, theme.accent);
-  char buf[8];
-  snprintf(buf, sizeof(buf), "%d%%", pct);
-  drawFontTextCX(buf, kCy - 56.0f, 2.2f, theme.fg);
+  if (pct >= 0) {
+    const float span = 240.0f * (pct / 100.0f);
+    gfx->fillArc(kCx, kCy, R + 4, R - 6, 115.0f, 115.0f + span,
+                 charging ? rgb(0x0E, 0x8A, 0x55) : theme.accent);
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d%%", pct);
+    drawFontTextCX(buf, kCy - 56.0f, 2.2f, theme.fg);
+  } else {
+    drawFontTextCX("--", kCy - 56.0f, 2.2f, theme.faint);
+  }
+  char remain[28];
+  formatBatteryRemaining(remain, sizeof(remain));
+  drawFontTextCX(remain, kCy - 10.0f, 0.75f,
+                 charging ? rgb(0x0E, 0x8A, 0x55) : theme.dim);
 
   // Wi‑Fi card — sized to sit inside the battery ring chord
-  const int cardY = kCy + 20;
+  const int cardY = kCy + 28;
   const int cardH = 88;
   const int cardHalf = 110;  // width 220; corners stay inside kContentR
   const int cardX = kCx - cardHalf;
@@ -1322,7 +1338,7 @@ void drawSystemHome() {
                     theme.accent);
 
   if (st != WL_CONNECTED) {
-    drawFontTextCX("TAP WIFI TO SCAN / JOIN", kCy + 140.0f, 0.65f, theme.faint);
+    drawFontTextCX("TAP WIFI TO SCAN / JOIN", kCy + 148.0f, 0.65f, theme.faint);
   }
 }
 
@@ -1998,6 +2014,60 @@ void captureHoldSnap() {
   }
 }
 
+// Modelled draw (mA) from brightness + radios — AMOLED dominates.
+int estimateBatteryDrawMa() {
+  int ma = 45;  // ESP32-S3 @ ~80–160 MHz idle + PMU
+  if (displayBright >= 160)
+    ma += 200;
+  else if (displayBright >= 70)
+    ma += 110;
+  else if (displayBright >= 25)
+    ma += 45;
+  else if (displayBright > 0)
+    ma += 12;
+  if (WiFi.getMode() != WIFI_OFF) {
+    ma += (WiFi.status() == WL_CONNECTED) ? 35 : 55;
+  }
+#if defined(CONFIG_BT_ENABLED)
+  ma += 8;  // long-interval BLE adv average
+#endif
+  const uint32_t mhz = getCpuFrequencyMhz();
+  if (mhz >= 240) ma += 35;
+  else if (mhz <= 80) ma -= 12;
+  if (ma < 25) ma = 25;
+  return ma;
+}
+
+void formatBatteryRemaining(char *buf, size_t n) {
+  if (!buf || n == 0) return;
+  if (powerIsCharging()) {
+    snprintf(buf, n, "CHARGING");
+    return;
+  }
+  const int pct = powerBatteryPercent();
+  if (pct < 0) {
+    if (powerOnVbus())
+      snprintf(buf, n, "USB POWER");
+    else
+      snprintf(buf, n, "NO BATTERY");
+    return;
+  }
+  const int drawMa = estimateBatteryDrawMa();
+  const int mahLeft = (pct * (int)BADGE_BATTERY_MAH + 50) / 100;
+  int mins = (mahLeft * 60) / drawMa;
+  if (mins < 1) mins = 1;
+  if (mins >= 60) {
+    const int h = mins / 60;
+    const int m = mins % 60;
+    if (m >= 5)
+      snprintf(buf, n, "%dH %dM LEFT", h, m);
+    else
+      snprintf(buf, n, "%dH REMAINING", h);
+  } else {
+    snprintf(buf, n, "%dM REMAINING", mins);
+  }
+}
+
 static float holdTouchDist(int16_t x, int16_t y) {
   const float dx = (float)(x - kCx);
   const float dy = (float)(y - kCy);
@@ -2420,6 +2490,23 @@ void startBleBeacon() {
 #endif
 }
 
+#if defined(CONFIG_BT_ENABLED)
+static bool bleAdvActive = true;
+
+static void bleSetAdvertising(bool on) {
+  if (on == bleAdvActive) return;
+  BLEAdvertising *adv = BLEDevice::getAdvertising();
+  if (!adv) return;
+  if (on)
+    adv->start();
+  else
+    adv->stop();
+  bleAdvActive = on;
+}
+#else
+static void bleSetAdvertising(bool on) { (void)on; }
+#endif
+
 // ---- setup / loop -------------------------------------------------------
 
 void setup() {
@@ -2436,7 +2523,8 @@ void setup() {
 
   if (!gfx->begin(80000000)) Serial.println("gfx->begin() failed!");
   else Serial.println("gfx ok");
-  panel->setBrightness(220);
+  panel->setBrightness(kBrightFull);
+  displayBright = kBrightFull;
 
   touch.setPins(TP_RESET, TP_INT);
   if (touch.begin(Wire, CST92XX_SLAVE_ADDRESS, IIC_SDA, IIC_SCL)) {
@@ -2508,12 +2596,26 @@ void loop() {
 
   const uint32_t idleMs = millis() - lastInteractionMs;
 
-  // Auto-dim AMOLED after idle (first touch while dimmed only wakes)
+  // Auto-dim AMOLED for battery — keep it glanceable (this is a badge)
   {
     uint8_t want = kBrightFull;
-    if (idleMs > 45000) want = 40;
-    else if (idleMs > 15000) want = 90;
+    if (idleMs > 45000)
+      want = 95;   // still readable across a room glance
+    else if (idleMs > 15000)
+      want = 140;  // mild dim
     setDisplayBrightness(want);
+  }
+
+  // Park radios / CPU when deeply idle; restore as soon as we interact
+  if (idleMs > 45000) {
+    bleSetAdvertising(false);
+    if (!holdArmed && !faceAnimActive && !touchDown &&
+        getCpuFrequencyMhz() > 80)
+      setCpuFrequencyMhz(80);
+  } else {
+    bleSetAdvertising(true);
+    if (!holdArmed && !faceAnimActive && getCpuFrequencyMhz() < 160)
+      setCpuFrequencyMhz(160);
   }
 
   const GestureEvent gesture = pollGesture();
@@ -2534,7 +2636,7 @@ void loop() {
     if (batteryFaceOn) {
       if (!batteryFaceWasOn) {
         lastBattery = millis();  // entry already drew a fresh reading
-      } else if (millis() - lastBattery >= 60000) {
+      } else if (millis() - lastBattery >= 15000) {
         lastBattery = millis();
         faceDirty = true;
       }
@@ -2635,6 +2737,6 @@ void loop() {
   // Idle: yield so FreeRTOS / modem sleep can run
   if (!painted && !holdArmed && !faceAnimActive && !touchDown &&
       sysMode != SYS_BUSY) {
-    delay(idleMs > 15000 ? 20 : 8);
+    delay(idleMs > 60000 ? 40 : idleMs > 15000 ? 20 : 8);
   }
 }
